@@ -1,0 +1,4 @@
+{
+  "search_url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/searchResults?txt_subject=ACC&txt_courseNumber=11&txt_campus=HAW&txt_keywordlike=1&txt_keywordall=1&txt_keywordany=1&txt_keywordexact=1&txt_keywordwithout=1&txt_level=N3&txt_instructionalMethod=DCO&txt_durationunit_value=1&txt_courseTitle=1&txt_course_number_range=1&txt_course_number_range_to=1&txt_credithourlow=1&txt_credithourhigh=1&chk_include_0=true&chk_include_1=true&chk_include_2=true&chk_include_3=true&chk_include_4=true&chk_include_5=true&chk_include_6=true&select_start_hour=11&select_start_min=55&select_start_ampm=AM&select_end_hour=12&select_end_min=40&select_end_ampm=PM&chk_open_only=true&txt_term=202710&startDatepicker=&endDatepicker=&uniqueSessionId=k0vmg1780540903445&pageOffset=0&pageMaxSize=10&sortColumn=subjectDescription&sortDirection=asc",
+  "status": 200
+}

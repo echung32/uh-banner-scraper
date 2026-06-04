@@ -1,0 +1,188 @@
+{
+  "1. Page Load (termSelection)": {
+    "path": "/ssb/term/termSelection",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/term/termSelection?mode=search"
+  },
+  "2. Get Terms (getTerms)": {
+    "path": "/ssb/classSearch/getTerms",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/getTerms?searchTerm=Fall%202026&offset=1&max=10&_=1780541486665"
+  },
+  "3. Set Active Term (term/search)": {
+    "path": "/ssb/term/search",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/term/search?mode=search"
+  },
+  "4. Transition Search Page (classSearch)": {
+    "path": "/ssb/classSearch/classSearch",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/classSearch"
+  },
+  "5. Autocomplete Subjects (get_subject)": {
+    "path": "/ssb/classSearch/get_subject",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_subject?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491657"
+  },
+  "6. Autocomplete Campuses (get_campus)": {
+    "path": "/ssb/classSearch/get_campus",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_campus?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491660"
+  },
+  "7. Autocomplete Instructional Methods (get_instructionalMethod)": {
+    "path": "/ssb/classSearch/get_instructionalMethod",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_instructionalMethod?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491663"
+  },
+  "8. Autocomplete Attributes (get_attribute)": {
+    "path": "/ssb/classSearch/get_attribute",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_attribute?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491666"
+  },
+  "9. Autocomplete Levels (get_level)": {
+    "path": "/ssb/classSearch/get_level",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_level?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491669"
+  },
+  "10. Autocomplete Buildings (get_building)": {
+    "path": "/ssb/classSearch/get_building",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_building?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491672"
+  },
+  "11. Autocomplete Colleges (get_college)": {
+    "path": "/ssb/classSearch/get_college",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_college?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491675"
+  },
+  "12. Autocomplete Departments (get_department)": {
+    "path": "/ssb/classSearch/get_department",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_department?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491678"
+  },
+  "13. Autocomplete Schedule Types (get_scheduleType)": {
+    "path": "/ssb/classSearch/get_scheduleType",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_scheduleType?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491681"
+  },
+  "14. Autocomplete Parts of Term (get_partOfTerm)": {
+    "path": "/ssb/classSearch/get_partOfTerm",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_partOfTerm?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491684"
+  },
+  "15. Autocomplete Sessions (get_session)": {
+    "path": "/ssb/classSearch/get_session",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/classSearch/get_session?searchTerm=&term=202710&offset=1&max=10&uniqueSessionId=jb3v81780541488094&_=1780541491687"
+  },
+  "16. Class Search Query (searchResults)": {
+    "path": "/ssb/searchResults/searchResults",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/searchResults?txt_subject=ICS&txt_courseNumber=111&txt_term=202710&startDatepicker=&endDatepicker=&uniqueSessionId=jb3v81780541488094&pageOffset=0&pageMaxSize=10&sortColumn=subjectDescription&sortDirection=asc"
+  },
+  "17. Contact Card Data (retrieveData)": {
+    "path": "/ssb/contactCard/retrieveData",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/contactCard/retrieveData?bannerId=7899&termCode=202710"
+  },
+  "18. Modal: Class Details (getClassDetails)": {
+    "path": "/ssb/searchResults/getClassDetails",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getClassDetails"
+  },
+  "19. Modal: Bookstore Links (getSectionBookstoreDetails)": {
+    "path": "/ssb/searchResults/getSectionBookstoreDetails",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getSectionBookstoreDetails"
+  },
+  "20. Modal: Course Description (getCourseDescription)": {
+    "path": "/ssb/searchResults/getCourseDescription",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getCourseDescription"
+  },
+  "21. Modal: Syllabus (getSyllabus)": {
+    "path": "/ssb/searchResults/getSyllabus",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getSyllabus"
+  },
+  "22. Modal: Attributes (getSectionAttributes)": {
+    "path": "/ssb/searchResults/getSectionAttributes",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getSectionAttributes"
+  },
+  "23. Modal: Restrictions (getRestrictions)": {
+    "path": "/ssb/searchResults/getRestrictions",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getRestrictions"
+  },
+  "24. Modal: Enrollment Details (getEnrollmentInfo)": {
+    "path": "/ssb/searchResults/getEnrollmentInfo",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getEnrollmentInfo"
+  },
+  "25. Modal: Corequisites (getCorequisites)": {
+    "path": "/ssb/searchResults/getCorequisites",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getCorequisites"
+  },
+  "26. Modal: Prerequisites (getSectionPrerequisites)": {
+    "path": "/ssb/searchResults/getSectionPrerequisites",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getSectionPrerequisites"
+  },
+  "27. Modal: Cross Listed (getXlstSections)": {
+    "path": "/ssb/searchResults/getXlstSections",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getXlstSections"
+  },
+  "28. Modal: Linked Sections (getLinkedSections)": {
+    "path": "/ssb/searchResults/getLinkedSections",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getLinkedSections"
+  },
+  "29. Modal: Course Fees (getFees)": {
+    "path": "/ssb/searchResults/getFees",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getFees"
+  },
+  "30. Modal: Catalog details (getSectionCatalogDetails)": {
+    "path": "/ssb/searchResults/getSectionCatalogDetails",
+    "status": "200 OK",
+    "method": "POST",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getSectionCatalogDetails"
+  },
+  "31. Modal: Faculty Schedules (getFacultyMeetingTimes)": {
+    "path": "/ssb/searchResults/getFacultyMeetingTimes",
+    "status": "200 OK",
+    "method": "GET",
+    "url": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb/ssb/searchResults/getFacultyMeetingTimes?term=202710&courseReferenceNumber=71843"
+  }
+}

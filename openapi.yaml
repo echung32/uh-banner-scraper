@@ -1,0 +1,1189 @@
+openapi: 3.1.0
+info:
+  title: University of Hawaii Student Information System (Banner SSB9) API
+  description: >
+    Specification for the Ellucian Banner SSB9 Course Catalog, Registration, Class Details popup, and Instructor Contact Card API at the University of Hawaii.
+    To use these endpoints programmatically, a client must first establish a session by hitting the term selection entry page,
+    extracting the synchronizer token (CSRF token) from the HTML `<meta name="synchronizerToken">` element, and maintaining the cookie jar (including `JSESSIONID` and F5 load balancer cookies).
+  version: 1.3.0
+servers:
+  - url: https://www.sis.hawaii.edu:9234/StudentRegistrationSsb
+    description: Production UH Student Information System Server
+paths:
+  /ssb/classSearch/getTerms:
+    get:
+      summary: Retrieve Academic Terms
+      description: Fetches a list of available academic terms for class search.
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      parameters:
+        - name: searchTerm
+          in: query
+          required: false
+          description: Search term to filter terms (e.g., 'Fall 2026')
+          schema:
+            type: string
+        - name: offset
+          in: query
+          required: true
+          description: Pagination offset (usually starts at 1)
+          schema:
+            type: integer
+            default: 1
+        - name: max
+          in: query
+          required: true
+          description: Maximum number of terms to return
+          schema:
+            type: integer
+            default: 10
+        - name: "_"
+          in: query
+          required: true
+          description: Cache-busting timestamp param
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of available academic terms
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AutocompleteItem'
+
+  /ssb/term/search:
+    post:
+      summary: Set Active Session Term
+      description: Sets/locks in the selected academic term in the current session state. This step is mandatory before performing class searches.
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      parameters:
+        - name: mode
+          in: query
+          required: true
+          description: Request mode (always 'search')
+          schema:
+            type: string
+            enum: [search]
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                term:
+                  type: string
+                  description: Term code to set (e.g. '202710')
+                  example: '202710'
+                studyPath:
+                  type: string
+                  description: Optional study path parameter
+                  default: ''
+                studyPathText:
+                  type: string
+                  description: Optional study path description
+                  default: ''
+                startDatepicker:
+                  type: string
+                  description: Optional start date filter
+                  default: ''
+                endDatepicker:
+                  type: string
+                  description: Optional end date filter
+                  default: ''
+                uniqueSessionId:
+                  type: string
+                  description: Unique client-generated identifier for the session tab
+                  example: 'h3if21780538123521'
+              required:
+                - term
+                - uniqueSessionId
+      responses:
+        '200':
+          description: Term successfully selected and stored in session state.
+        '302':
+          description: Redirect to search page.
+
+  # --- AUTOCOMPLETE FILTER LOOKUP ENDPOINTS ---
+  /ssb/classSearch/get_subject:
+    get:
+      summary: Query Subjects
+      description: Returns a list of subjects matching the search term for a given term.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_campus:
+    get:
+      summary: Query Campuses
+      description: Returns campuses matching the search term for a given term.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_instructionalMethod:
+    get:
+      summary: Query Instructional Methods
+      description: Returns instructional methods matching the search term for a given term.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_attribute:
+    get:
+      summary: Query Attributes
+      description: Returns course attributes (e.g. Writing Intensive focus) matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_level:
+    get:
+      summary: Query Course Levels
+      description: Returns academic levels (e.g. Undergraduate, Graduate) matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_building:
+    get:
+      summary: Query Buildings
+      description: Returns campus buildings matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_college:
+    get:
+      summary: Query Colleges
+      description: Returns colleges matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_department:
+    get:
+      summary: Query Departments
+      description: Returns departments matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_scheduleType:
+    get:
+      summary: Query Schedule Types
+      description: Returns schedule types (e.g. Lecture, Lab, Seminar) matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_partOfTerm:
+    get:
+      summary: Query Parts of Term
+      description: Returns parts of term (e.g. full semester, accelerated term) matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  /ssb/classSearch/get_session:
+    get:
+      summary: Query Sessions
+      description: Returns sessions matching the query.
+      $ref: '#/components/pathTemplates/AutocompleteGET'
+
+  # --- SEARCH ENDPOINT WITH FULL PARAMETERS ---
+  /ssb/searchResults/searchResults:
+    get:
+      summary: Execute Class Search
+      description: Performs section queries using basic or advanced filters. A term must have been locked in the session first.
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      parameters:
+        - $ref: '#/components/parameters/txt_subject'
+        - $ref: '#/components/parameters/txt_courseNumber'
+        - $ref: '#/components/parameters/txt_campus'
+        - $ref: '#/components/parameters/txt_keywordlike'
+        - $ref: '#/components/parameters/txt_keywordall'
+        - $ref: '#/components/parameters/txt_keywordany'
+        - $ref: '#/components/parameters/txt_keywordexact'
+        - $ref: '#/components/parameters/txt_keywordwithout'
+        - $ref: '#/components/parameters/txt_attribute'
+        - $ref: '#/components/parameters/txt_level'
+        - $ref: '#/components/parameters/txt_instructionalMethod'
+        - $ref: '#/components/parameters/txt_durationunit_value'
+        - $ref: '#/components/parameters/txt_courseTitle'
+        - $ref: '#/components/parameters/txt_course_number_range'
+        - $ref: '#/components/parameters/txt_course_number_range_to'
+        - $ref: '#/components/parameters/txt_credithourlow'
+        - $ref: '#/components/parameters/txt_credithourhigh'
+        - $ref: '#/components/parameters/chk_include_0'
+        - $ref: '#/components/parameters/chk_include_1'
+        - $ref: '#/components/parameters/chk_include_2'
+        - $ref: '#/components/parameters/chk_include_3'
+        - $ref: '#/components/parameters/chk_include_4'
+        - $ref: '#/components/parameters/chk_include_5'
+        - $ref: '#/components/parameters/chk_include_6'
+        - $ref: '#/components/parameters/select_start_hour'
+        - $ref: '#/components/parameters/select_start_min'
+        - $ref: '#/components/parameters/select_start_ampm'
+        - $ref: '#/components/parameters/select_end_hour'
+        - $ref: '#/components/parameters/select_end_min'
+        - $ref: '#/components/parameters/select_end_ampm'
+        - $ref: '#/components/parameters/chk_open_only'
+        - $ref: '#/components/parameters/txt_term'
+        - $ref: '#/components/parameters/startDatepicker'
+        - $ref: '#/components/parameters/endDatepicker'
+        - $ref: '#/components/parameters/uniqueSessionId'
+        - $ref: '#/components/parameters/pageOffset'
+        - $ref: '#/components/parameters/pageMaxSize'
+        - $ref: '#/components/parameters/sortColumn'
+        - $ref: '#/components/parameters/sortDirection'
+      responses:
+        '200':
+          description: Matching course sections and metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SearchResultsResponse'
+
+  # --- OTHER INSTRUCTOR & DETAILS MODAL ENDPOINTS ---
+  /ssb/contactCard/retrieveData:
+    get:
+      summary: Retrieve Instructor Contact Card
+      description: Fetches details for an instructor (displayName, email, title, etc.).
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      parameters:
+        - name: bannerId
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '7814'
+        - name: termCode
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '202710'
+      responses:
+        '200':
+          description: Instructor card configuration and profile details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ContactCardResponse'
+
+  /ssb/searchResults/getClassDetails:
+    post:
+      summary: Get Class details
+      description: Returns basic class metadata.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getSectionBookstoreDetails:
+    post:
+      summary: Get Bookstore Links
+      description: Returns links to campus bookstores.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getCourseDescription:
+    post:
+      summary: Get Course Description
+      description: Returns official catalog course description.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getSyllabus:
+    post:
+      summary: Get Syllabus Information
+      description: Returns syllabus text if available.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getSectionAttributes:
+    post:
+      summary: Get Section Attributes
+      description: Returns Gened/Focus attributes list.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getRestrictions:
+    post:
+      summary: Get Restrictions
+      description: Returns level, college, field of study, or class restrictions.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getEnrollmentInfo:
+    post:
+      summary: Get Enrollment and Seats Details
+      description: Returns live seat availability and waitlist metrics.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getCorequisites:
+    post:
+      summary: Get Corequisites
+      description: Returns courses that must be taken concurrently.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getSectionPrerequisites:
+    post:
+      summary: Get Prerequisites
+      description: Returns course prerequisites and minimum test score requirements.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getXlstSections:
+    post:
+      summary: Get Cross Listed Sections
+      description: Returns details on cross-listed sections sharing capacity.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getLinkedSections:
+    post:
+      summary: Get Linked Sections
+      description: Returns linked sections (like lectures requiring a specific lab/discussion).
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getFees:
+    post:
+      summary: Get Course Fees
+      description: Returns details on course-specific or laboratory fees.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getSectionCatalogDetails:
+    post:
+      summary: Get Catalog Details
+      description: Returns college, department, credit hours, and grade modes.
+      x-response-format: html
+      $ref: '#/components/pathTemplates/CourseDetailPOST'
+
+  /ssb/searchResults/getFacultyMeetingTimes:
+    get:
+      summary: Get Instructor Schedule & Meeting Times
+      description: Returns meeting times and instructor names in JSON.
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      parameters:
+        - name: term
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '202710'
+        - name: courseReferenceNumber
+          in: query
+          required: true
+          schema:
+            type: string
+            example: '71843'
+      responses:
+        '200':
+          description: Class schedules and instructor list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fmt:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/SectionSession'
+                required:
+                  - fmt
+
+components:
+  securitySchemes:
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: JSESSIONID
+      description: Standard Tomcat Session Identifier.
+    CSRFToken:
+      type: apiKey
+      in: header
+      name: x-synchronizer-token
+      description: Anti-forgery/CSRF synchronizer token extracted from the HTML meta tag.
+
+  pathTemplates:
+    AutocompleteGET:
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      parameters:
+        - name: searchTerm
+          in: query
+          required: false
+          description: Filter keyword for autocomplete search
+          schema:
+            type: string
+        - name: term
+          in: query
+          required: true
+          description: Term code (e.g. '202710')
+          schema:
+            type: string
+        - name: offset
+          in: query
+          required: true
+          schema:
+            type: integer
+            default: 1
+        - name: max
+          in: query
+          required: true
+          schema:
+            type: integer
+            default: 10
+        - name: uniqueSessionId
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: "_"
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of matching lookup codes and descriptions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AutocompleteItem'
+
+    CourseDetailPOST:
+      security:
+        - CookieAuth: []
+        - CSRFToken: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              properties:
+                term:
+                  type: string
+                  example: '202710'
+                courseReferenceNumber:
+                  type: string
+                  example: '71843'
+                first:
+                  type: string
+                  required: false
+                  example: 'first'
+              required:
+                - term
+                - courseReferenceNumber
+      responses:
+        '200':
+          description: HTML section block containing requested details
+          content:
+            text/html:
+              schema:
+                type: string
+
+  parameters:
+    txt_subject:
+      name: txt_subject
+      in: query
+      required: true
+      description: Subject code (e.g. 'ICS'). Multiple parameters allowed.
+      schema:
+        type: string
+    txt_courseNumber:
+      name: txt_courseNumber
+      in: query
+      required: false
+      description: Optional course number (e.g. '111')
+      schema:
+        type: string
+    txt_campus:
+      name: txt_campus
+      in: query
+      required: false
+      description: Optional campus code (e.g. 'MAN')
+      schema:
+        type: string
+    txt_keywordlike:
+      name: txt_keywordlike
+      in: query
+      required: false
+      description: Keyword search term (like matching)
+      schema:
+        type: string
+    txt_keywordall:
+      name: txt_keywordall
+      in: query
+      required: false
+      description: Keyword search term (all keywords matching)
+      schema:
+        type: string
+    txt_keywordany:
+      name: txt_keywordany
+      in: query
+      required: false
+      description: Keyword search term (any keywords matching)
+      schema:
+        type: string
+    txt_keywordexact:
+      name: txt_keywordexact
+      in: query
+      required: false
+      description: Keyword search term (exact phrase matching)
+      schema:
+        type: string
+    txt_keywordwithout:
+      name: txt_keywordwithout
+      in: query
+      required: false
+      description: Keyword search term (exclude keywords matching)
+      schema:
+        type: string
+    txt_attribute:
+      name: txt_attribute
+      in: query
+      required: false
+      description: Course attribute code (e.g. Focus area such as 'WI' for Writing Intensive).
+      schema:
+        type: string
+    txt_level:
+      name: txt_level
+      in: query
+      required: false
+      description: Course level code (e.g. 'UG', 'GR')
+      schema:
+        type: string
+    txt_instructionalMethod:
+      name: txt_instructionalMethod
+      in: query
+      required: false
+      description: Instructional method code (e.g. 'DCO' for Distance Online)
+      schema:
+        type: string
+    txt_durationunit_value:
+      name: txt_durationunit_value
+      in: query
+      required: false
+      description: Duration unit value filter
+      schema:
+        type: string
+    txt_courseTitle:
+      name: txt_courseTitle
+      in: query
+      required: false
+      description: Course title search term
+      schema:
+        type: string
+    txt_course_number_range:
+      name: txt_course_number_range
+      in: query
+      required: false
+      description: Course number range start limit
+      schema:
+        type: string
+    txt_course_number_range_to:
+      name: txt_course_number_range_to
+      in: query
+      required: false
+      description: Course number range end limit
+      schema:
+        type: string
+    txt_credithourlow:
+      name: txt_credithourlow
+      in: query
+      required: false
+      description: Credit hour range low limit
+      schema:
+        type: string
+    txt_credithourhigh:
+      name: txt_credithourhigh
+      in: query
+      required: false
+      description: Credit hour range high limit
+      schema:
+        type: string
+    chk_include_0:
+      name: chk_include_0
+      in: query
+      required: false
+      description: Sunday meeting filter (set to 'true' to filter sections meeting on Sunday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    chk_include_1:
+      name: chk_include_1
+      in: query
+      required: false
+      description: Monday meeting filter (set to 'true' to filter sections meeting on Monday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    chk_include_2:
+      name: chk_include_2
+      in: query
+      required: false
+      description: Tuesday meeting filter (set to 'true' to filter sections meeting on Tuesday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    chk_include_3:
+      name: chk_include_3
+      in: query
+      required: false
+      description: Wednesday meeting filter (set to 'true' to filter sections meeting on Wednesday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    chk_include_4:
+      name: chk_include_4
+      in: query
+      required: false
+      description: Thursday meeting filter (set to 'true' to filter sections meeting on Thursday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    chk_include_5:
+      name: chk_include_5
+      in: query
+      required: false
+      description: Friday meeting filter (set to 'true' to filter sections meeting on Friday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    chk_include_6:
+      name: chk_include_6
+      in: query
+      required: false
+      description: Saturday meeting filter (set to 'true' to filter sections meeting on Saturday)
+      schema:
+        type: string
+        enum: ['true', 'false']
+    select_start_hour:
+      name: select_start_hour
+      in: query
+      required: false
+      description: Class start hour filter (1-12)
+      schema:
+        type: string
+    select_start_min:
+      name: select_start_min
+      in: query
+      required: false
+      description: Class start minute filter (00-59)
+      schema:
+        type: string
+    select_start_ampm:
+      name: select_start_ampm
+      in: query
+      required: false
+      description: Class start AM/PM filter
+      schema:
+        type: string
+        enum: [AM, PM]
+    select_end_hour:
+      name: select_end_hour
+      in: query
+      required: false
+      description: Class end hour filter (1-12)
+      schema:
+        type: string
+    select_end_min:
+      name: select_end_min
+      in: query
+      required: false
+      description: Class end minute filter (00-59)
+      schema:
+        type: string
+    select_end_ampm:
+      name: select_end_ampm
+      in: query
+      required: false
+      description: Class end AM/PM filter
+      schema:
+        type: string
+        enum: [AM, PM]
+    chk_open_only:
+      name: chk_open_only
+      in: query
+      required: false
+      description: Set to 'true' to filter open sections only
+      schema:
+        type: string
+        enum: ['true', 'false']
+    txt_term:
+      name: txt_term
+      in: query
+      required: true
+      description: Active selected term code (must match set term, e.g. '202710')
+      schema:
+        type: string
+    startDatepicker:
+      name: startDatepicker
+      in: query
+      required: false
+      schema:
+        type: string
+        default: ''
+    endDatepicker:
+      name: endDatepicker
+      in: query
+      required: false
+      schema:
+        type: string
+        default: ''
+    uniqueSessionId:
+      name: uniqueSessionId
+      in: query
+      required: true
+      schema:
+        type: string
+    pageOffset:
+      name: pageOffset
+      in: query
+      required: true
+      description: Pagination offset
+      schema:
+        type: integer
+        default: 0
+    pageMaxSize:
+      name: pageMaxSize
+      in: query
+      required: true
+      description: Results page size limit
+      schema:
+        type: integer
+        default: 10
+    sortColumn:
+      name: sortColumn
+      in: query
+      required: true
+      description: Column to sort by
+      schema:
+        type: string
+        default: subjectDescription
+    sortDirection:
+      name: sortDirection
+      in: query
+      required: true
+      description: Sorting direction
+      schema:
+        type: string
+        enum: [asc, desc]
+        default: asc
+
+  schemas:
+    AutocompleteItem:
+      type: object
+      properties:
+        code:
+          type: string
+          example: '202710'
+        description:
+          type: string
+          example: 'Fall 2026'
+      required:
+        - code
+        - description
+
+    ContactCardResponse:
+      type: object
+      properties:
+        data:
+          type: object
+          properties:
+            facultyCardPopupConfig:
+              type: array
+              items:
+                type: object
+                properties:
+                  config:
+                    type: string
+                  display:
+                    type: string
+                  title:
+                    type: string
+                  required:
+                    type: boolean
+            personData:
+              type: object
+              properties:
+                displayName:
+                  type: string
+                  example: 'Kyle M. Berney'
+                scheduleIndicator:
+                  type: string
+                  example: 'Y'
+                advisorIndicator:
+                  type: string
+                  example: 'N'
+                title:
+                  type: string
+                  nullable: true
+                deptAndCollegeInformation:
+                  type: string
+                  nullable: true
+                address:
+                  type: string
+                  nullable: true
+                telephone:
+                  type: string
+                  nullable: true
+                email:
+                  type: string
+                  example: 'berneyk@hawaii.edu'
+                bannerId:
+                  type: string
+                  example: '7814'
+              required:
+                - displayName
+                - email
+                - bannerId
+            message:
+              type: string
+              example: ''
+          required:
+            - facultyCardPopupConfig
+            - personData
+            - message
+      required:
+        - data
+
+    SearchResultsResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+          example: true
+        totalCount:
+          type: integer
+          example: 18
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/CourseSection'
+        pageOffset:
+          type: integer
+          example: 0
+        pageMaxSize:
+          type: integer
+          example: 10
+        sectionsFetchedCount:
+          type: integer
+          example: 18
+        pathMode:
+          type: string
+          example: 'search'
+        searchResultsConfigs:
+          type: array
+          items:
+            type: object
+            properties:
+              config:
+                type: string
+              display:
+                type: string
+              title:
+                type: string
+              required:
+                type: boolean
+              width:
+                type: string
+        ztcEncodedImage:
+          type: string
+          description: Base64 encoded image string (if zero-textbook-cost config is active)
+      required:
+        - success
+        - totalCount
+        - data
+        - pageOffset
+        - pageMaxSize
+
+    CourseSection:
+      type: object
+      properties:
+        id:
+          type: integer
+          example: 988787
+        term:
+          type: string
+          example: '202710'
+        termDesc:
+          type: string
+          example: 'Fall 2026'
+        courseReferenceNumber:
+          type: string
+          description: CRN (Course Reference Number)
+          example: '71843'
+        partOfTerm:
+          type: string
+          example: 'MAN'
+        courseNumber:
+          type: string
+          example: '1110'
+        courseDisplay:
+          type: string
+          example: '111'
+        subject:
+          type: string
+          example: 'ICS'
+        subjectDescription:
+          type: string
+          example: 'Information&amp; Computer Sciences'
+        sequenceNumber:
+          type: string
+          example: '001'
+        campusDescription:
+          type: string
+          example: 'University of Hawaii at Manoa'
+        scheduleTypeDescription:
+          type: string
+          example: 'Lecture/Discussion'
+        courseTitle:
+          type: string
+          example: 'Introduction to Computer Science I'
+        creditHours:
+          type: integer
+          nullable: true
+        maximumEnrollment:
+          type: integer
+          example: 37
+        enrollment:
+          type: integer
+          example: 6
+        seatsAvailable:
+          type: integer
+          example: 31
+        waitCapacity:
+          type: integer
+          example: 10
+        waitCount:
+          type: integer
+          example: 0
+        waitAvailable:
+          type: integer
+          example: 10
+        crossList:
+          type: string
+          nullable: true
+          example: 'MAN-C-054'
+        crossListCapacity:
+          type: integer
+          nullable: true
+          example: 270
+        crossListCount:
+          type: integer
+          nullable: true
+          example: 37
+        crossListAvailable:
+          type: integer
+          nullable: true
+          example: 233
+        creditHourHigh:
+          type: integer
+          nullable: true
+        creditHourLow:
+          type: integer
+          example: 4
+        creditHourIndicator:
+          type: string
+          nullable: true
+        openSection:
+          type: boolean
+          example: true
+        linkIdentifier:
+          type: string
+          nullable: true
+        isSectionLinked:
+          type: boolean
+          example: false
+        subjectCourse:
+          type: string
+          example: 'ICS111'
+        faculty:
+          type: array
+          items:
+            $ref: '#/components/schemas/Faculty'
+        meetingsFaculty:
+          type: array
+          items:
+            $ref: '#/components/schemas/SectionSession'
+        reservedSeatSummary:
+          type: object
+          nullable: true
+        sectionAttributes:
+          type: array
+          items:
+            type: object
+        instructionalMethod:
+          type: string
+          example: 'INP'
+        instructionalMethodDescription:
+          type: string
+          example: 'In Person'
+      required:
+        - id
+        - term
+        - courseReferenceNumber
+        - courseNumber
+        - subject
+        - courseTitle
+        - maximumEnrollment
+        - enrollment
+        - seatsAvailable
+        - openSection
+
+    Faculty:
+      type: object
+      properties:
+        bannerId:
+          type: string
+          example: '10009'
+        category:
+          type: string
+          nullable: true
+        class:
+          type: string
+          example: 'net.hedtech.banner.student.faculty.FacultyResultDecorator'
+        courseReferenceNumber:
+          type: string
+          example: '71843'
+        displayName:
+          type: string
+          example: 'Kyle M. Berney'
+        emailAddress:
+          type: string
+          example: 'berneyk@hawaii.edu'
+        primaryIndicator:
+          type: boolean
+          example: true
+        term:
+          type: string
+          example: '202710'
+      required:
+        - bannerId
+        - displayName
+        - emailAddress
+        - primaryIndicator
+
+    SectionSession:
+      type: object
+      properties:
+        category:
+          type: string
+          example: '2A'
+        class:
+          type: string
+          example: 'net.hedtech.banner.student.schedule.SectionSessionDecorator'
+        courseReferenceNumber:
+          type: string
+          example: '71843'
+        faculty:
+          type: array
+          items:
+            type: object
+        meetingTime:
+          $ref: '#/components/schemas/MeetingTime'
+        term:
+          type: string
+          example: '202710'
+      required:
+        - category
+        - courseReferenceNumber
+        - meetingTime
+
+    MeetingTime:
+      type: object
+      properties:
+        beginTime:
+          type: string
+          description: Meeting start time in 24h format (HHMM)
+          example: '0900'
+        building:
+          type: string
+          example: 'POST'
+        buildingDescription:
+          type: string
+          example: 'Pacific Ocean Science &amp; Tech'
+        campus:
+          type: string
+          example: 'MAN'
+        campusDescription:
+          type: string
+          example: 'University of Hawaii at Manoa'
+        category:
+          type: string
+          example: '2A'
+        class:
+          type: string
+          example: 'net.hedtech.banner.general.overall.MeetingTimeDecorator'
+        courseReferenceNumber:
+          type: string
+          example: '71843'
+        creditHourSession:
+          type: number
+          example: 0.0
+        endDate:
+          type: string
+          description: End date of session (MM/DD/YYYY)
+          example: '12/18/2026'
+        endTime:
+          type: string
+          description: Meeting end time in 24h format (HHMM)
+          example: '1015'
+        friday:
+          type: boolean
+          example: false
+        hoursWeek:
+          type: number
+          example: 3.0
+        meetingScheduleType:
+          type: string
+          example: 'LED'
+        meetingType:
+          type: string
+          example: 'CLAS'
+        meetingTypeDescription:
+          type: string
+          example: 'Class'
+        monday:
+          type: boolean
+          example: false
+        room:
+          type: string
+          example: '318A'
+        saturday:
+          type: boolean
+          example: false
+        startDate:
+          type: string
+          description: Start date of session (MM/DD/YYYY)
+          example: '08/24/2026'
+        sunday:
+          type: boolean
+          example: false
+        term:
+          type: string
+          example: '202710'
+        thursday:
+          type: boolean
+          example: true
+        tuesday:
+          type: boolean
+          example: true
+        wednesday:
+          type: boolean
+          example: false
+      required:
+        - beginTime
+        - endTime
+        - building
+        - room
+        - startDate
+        - endDate
+        - monday
+        - tuesday
+        - wednesday
+        - thursday
+        - friday
+        - saturday
+        - sunday
