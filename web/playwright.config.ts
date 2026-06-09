@@ -41,12 +41,14 @@ export default defineConfig({
       stdout: "pipe",
     },
     {
-      command: `yarn astro dev --port ${APP_PORT} --host 127.0.0.1`,
+      // Use the production build (preview) rather than dev so the Astro dev
+      // toolbar / serialized island debug output don't pollute the DOM.
+      command: `yarn build && yarn preview`,
       url: `http://127.0.0.1:${APP_PORT}`,
       reuseExistingServer: !process.env.CI,
-      env: { SIS_BASE_URL },
+      env: { SIS_BASE_URL, HOST: "127.0.0.1", PORT: String(APP_PORT) },
       stdout: "pipe",
-      timeout: 120_000,
+      timeout: 180_000,
     },
   ],
 });
