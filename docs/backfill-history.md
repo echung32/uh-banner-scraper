@@ -95,20 +95,55 @@ Mitigations now in the ingest (all configurable):
 - The details passes rotate by request count too (`CATALOG_PER_SESSION`, `ITEMS_PER_SESSION`).
 - Section detail is **lazy** (no eager 6-endpoint-per-CRN pass), removing the heaviest load.
 
-## Outstanding — BLOCKED on Cloudflare token (2026-06-09 ~18:00)
+## Cloudflare token interruption (2026-06-09 ~18:00, resolved)
 
-The optimized finishing run (Fall tail mop-up + Spring 93→270 + details pass) is **coded,
-tested (22/22 e2e), and ready**, but **could not run**: the Cloudflare API token in
-`web/.env` now returns `7403` / `9109 — "Cannot use the access token from location:
-<egress-IP>"`. The token is **active and unexpired**; it has an **IP allowlist**, and the
-dev container's egress IP changed to `<egress-IP>` (it was allowlisted earlier, which is
-why the ~14:00 runs worked). **Action required:** add `<egress-IP>` to the token's IP
-filtering (or remove the restriction / supply a non-IP-scoped token). The already-written
-remote data (Fall 8,436 + Spring 3,466 sections) is intact.
+Mid-session the dev container's egress IP changed and the Cloudflare API token (which has
+an IP allowlist) started returning `7403` / `9109 — "Cannot use the access token from
+location: …"`. The token was active/unexpired — purely an IP-allowlist miss. The user
+re-allowlisted the new egress IP and the run resumed. (Lesson: an IP-scoped token + a
+dynamic dev-container IP is fragile; prefer an unrestricted token or a stable egress.)
 
-Once D1 access is restored, run (Banner was responsive again as of ~17:56):
-- `POST /api/admin/sync?term=202710&delayMs=200&subjectsPerSession=40` (mop Fall tail).
-- `POST /api/admin/sync?term=202630&delayMs=200&subjectsPerSession=40` (finish Spring).
-- `POST /api/admin/sync-details?term=202710&sections=0&delayMs=200` then same for `202630`
-  (populates `course` → College/Department filters + panel text, `filter_option`,
-  `instructor`).
+## Completed run #2 — optimized, both terms (2026-06-09 ~21:00–22:40)
+
+With **session rotation by request count** in place, the full backfill ran **clean — every
+pass `status: ok`, zero throttling** across ~1.5 h of continuous live traffic:
+
+| Pass | Fall 2026 (`202710`) | Spring 2026 (`202630`) |
+|------|----------------------|------------------------|
+| Catalog sync (sections) | **9,170** (was 8,436 partial) | **8,757** (was 3,466 error) |
+| Filter options | 53 | 53 |
+| Course catalog rows (`text=0`, college/dept) | **5,313** — all w/ college & dept | **5,242** — all w/ college & dept |
+| Instructor cards | n/a — endpoint down (see below) | n/a |
+
+The College/Department filters and the details panel's catalog facts (college, department,
+grading modes, schedule types) are now populated for both terms.
+
+### Instructor contact cards — UH endpoint returning 500 (2026-06-09 ~22:40)
+
+The instructors pass wrote nothing: `GET /ssb/contactCard/retrieveData` returns **HTTP 500
+for every bannerId** — Staff placeholders, real named faculty (e.g. "Kevin T. Murata"), and
+even the id `8198` that worked during Slice 4 — both with and without a prior subject
+search. So it's not a stale-id, Staff, or search-context issue; the endpoint appears
+**disabled/broken at UH right now**. Instructor *enrichment* (title / department / college)
+is therefore unavailable. **Mitigation shipped:** the details panel now renders each
+instructor's **name + email from the section's own `faculty[]`** (always present in the
+search data) and overlays the contact-card fields only if/when the `instructor` table is
+populated — so instructors show regardless, and enrichment lights up automatically once UH's
+endpoint recovers and an instructors pass succeeds.
+
+### Intentionally deferred (lazy / future)
+
+- **Course description / prerequisites / corequisites** — skipped (`text=0`) because they're
+  3 of the 4 per-course fetches (~31 k requests) and only feed the panel's text. Best filled
+  **lazily on first panel view** (mirroring section detail) — a clean follow-up; `upsertCourse`
+  already COALESCEs text so a slim pass never clobbers it. Until then the panel shows
+  "No description available".
+- **Section detail** — already **lazy** (`/api/section` fetches on first view); no eager pass.
+
+### Resume / refresh commands
+
+- Sections: `POST /api/admin/sync?term=<code>&delayMs=200&subjectsPerSession=40`
+- Filters: `POST /api/admin/sync-details?term=<code>&catalog=0&sections=0&instructors=0`
+- Catalog (college/dept only): `…/sync-details?term=<code>&filters=0&catalog=1&text=0&sections=0&instructors=0&delayMs=100`
+- Full catalog incl. text: same as above with `text=1` (4× the load — pace it)
+- Instructors: `…/sync-details?term=<code>&filters=0&catalog=0&sections=0&instructors=1&delayMs=80`

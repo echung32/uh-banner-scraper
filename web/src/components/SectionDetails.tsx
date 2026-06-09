@@ -73,7 +73,10 @@ export function SectionDetails({ section }: { section: CourseSection }) {
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState<CourseCatalog | null>(null);
   const [detail, setDetail] = useState<SectionDetail | null>(null);
-  const [instructors, setInstructors] = useState<Instructor[]>([]);
+  // Contact-card enrichment (title/department/college) keyed by bannerId. The
+  // base name + email always come from the section's own faculty[]; the card is
+  // overlaid only when present (UH's contact-card endpoint is often unavailable).
+  const [enrichment, setEnrichment] = useState<Record<string, Instructor>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -96,14 +99,18 @@ export function SectionDetails({ section }: { section: CourseSection }) {
       getJson<SectionDetail>(sectionUrl),
       Promise.all(
         facultyIds.map((id) =>
-          getJson<Instructor>(`/api/instructor?bannerId=${encodeURIComponent(id)}`)
+          getJson<Instructor>(`/api/instructor?bannerId=${encodeURIComponent(id)}`).then(
+            (card) => [id, card] as const
+          )
         )
       ),
-    ]).then(([cat, det, instrs]) => {
+    ]).then(([cat, det, cards]) => {
       if (cancelled) return;
       setCatalog(cat);
       setDetail(det);
-      setInstructors(instrs.filter((x): x is Instructor => x !== null));
+      const map: Record<string, Instructor> = {};
+      for (const [id, card] of cards) if (card) map[id] = card;
+      setEnrichment(map);
       setLoading(false);
     });
 
@@ -193,29 +200,41 @@ export function SectionDetails({ section }: { section: CourseSection }) {
       {/* Section + instructor facts */}
       <div className="space-y-4">
         <Section title="Instructors">
-          {instructors.length === 0 ? (
+          {section.faculty.length === 0 ? (
             <span className="text-muted-foreground">No instructor listed.</span>
           ) : (
             <ul className="space-y-2">
-              {instructors.map((i) => (
-                <li key={i.bannerId} className="rounded-md border p-2">
-                  <div className="font-medium">{i.displayName ?? "—"}</div>
-                  {i.title && <div className="text-xs text-muted-foreground">{i.title}</div>}
-                  {(i.department || i.college) && (
-                    <div className="text-xs text-muted-foreground">
-                      {[i.department, i.college].filter(Boolean).join(" · ")}
+              {section.faculty.map((f) => {
+                const card = f.bannerId ? enrichment[f.bannerId] : undefined;
+                return (
+                  <li key={f.bannerId || f.displayName} className="rounded-md border p-2">
+                    <div className="font-medium">
+                      {f.displayName ?? "—"}
+                      {f.primaryIndicator && (
+                        <span className="ml-1 text-xs font-normal text-muted-foreground">
+                          (primary)
+                        </span>
+                      )}
                     </div>
-                  )}
-                  {i.email && (
-                    <a
-                      href={`mailto:${i.email}`}
-                      className="text-xs text-blue-600 hover:underline dark:text-blue-400"
-                    >
-                      {i.email}
-                    </a>
-                  )}
-                </li>
-              ))}
+                    {card?.title && (
+                      <div className="text-xs text-muted-foreground">{card.title}</div>
+                    )}
+                    {(card?.department || card?.college) && (
+                      <div className="text-xs text-muted-foreground">
+                        {[card.department, card.college].filter(Boolean).join(" · ")}
+                      </div>
+                    )}
+                    {f.emailAddress && (
+                      <a
+                        href={`mailto:${f.emailAddress}`}
+                        className="text-xs text-blue-600 hover:underline dark:text-blue-400"
+                      >
+                        {f.emailAddress}
+                      </a>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
           )}
         </Section>
