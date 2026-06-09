@@ -110,10 +110,10 @@ test("expanding a section row shows catalog, lazily-fetched detail, and instruct
     page.getByText("College of Natural Sciences").last()
   ).toBeVisible();
 
-  // Instructor card comes from the seeded `instructor` row (read path, D1). The
-  // title is panel-only (the table column shows just the name), so it's a clean
-  // signal the card rendered.
-  await expect(page.getByText("Associate Professor")).toBeVisible();
+  // Instructor name + email render from the section's faculty[] (email is
+  // panel-only — the table column shows just the name — so it's a clean signal
+  // the instructor block rendered).
+  await expect(page.getByText("jane@hawaii.edu")).toBeVisible();
 
   // Section detail is NOT seeded — it's fetched live from the mock SIS on first
   // view and stored (lazy cache-on-miss). The mock serves a $50 fee and marks
@@ -123,7 +123,7 @@ test("expanding a section row shows catalog, lazily-fetched detail, and instruct
 
   // Collapsing hides the panel again.
   await page.getByRole("cell", { name: "ICS 111" }).first().click();
-  await expect(page.getByText("Associate Professor")).toHaveCount(0);
+  await expect(page.getByText("jane@hawaii.edu")).toHaveCount(0);
 });
 
 test("course number filter narrows the results", async ({ page }) => {

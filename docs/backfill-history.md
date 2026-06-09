@@ -118,18 +118,40 @@ pass `status: ok`, zero throttling** across ~1.5 h of continuous live traffic:
 The College/Department filters and the details panel's catalog facts (college, department,
 grading modes, schedule types) are now populated for both terms.
 
-### Instructor contact cards — UH endpoint returning 500 (2026-06-09 ~22:40)
+### Instructor contact cards — faculty bannerId is SESSION-SCOPED (root cause found)
 
-The instructors pass wrote nothing: `GET /ssb/contactCard/retrieveData` returns **HTTP 500
-for every bannerId** — Staff placeholders, real named faculty (e.g. "Kevin T. Murata"), and
-even the id `8198` that worked during Slice 4 — both with and without a prior subject
-search. So it's not a stale-id, Staff, or search-context issue; the endpoint appears
-**disabled/broken at UH right now**. Instructor *enrichment* (title / department / college)
-is therefore unavailable. **Mitigation shipped:** the details panel now renders each
-instructor's **name + email from the section's own `faculty[]`** (always present in the
-search data) and overlays the contact-card fields only if/when the `instructor` table is
-populated — so instructors show regardless, and enrichment lights up automatically once UH's
-endpoint recovers and an instructors pass succeeds.
+The instructors pass wrote nothing because `GET /ssb/contactCard/retrieveData` returned
+HTTP 500 for every stored bannerId. The 500 body is a Grails
+`ContactCardController.retrieveData` **`ValidationException`** (masked by a secondary
+`returnMap()` NoSuchMethod bug). Root cause, confirmed live:
+
+**The faculty `bannerId` in `searchResults.faculty[]` is a per-session surrogate token, not a
+stable PIDM.** `contactCard/retrieveData` only accepts a bannerId that is present in the
+**current session's most-recent search results**; a bannerId from any other (now-expired)
+session fails validation → 500. Proof: in one fresh session, search `ICS 111`, take a
+faculty bannerId straight from that JSON, and immediately card it → **200 JSON**
+("Kyle M. Berney"). The *same person* was `bannerId=7814` in the June-4 capture but `3026`
+now — the id rotates per session. So `syncInstructors`, which carded bannerIds stored from
+earlier full-sync sessions, could never work. (It's not stale-data-only, not Staff, not
+missing headers, not termCode — all of those were ruled out.)
+
+**Implication for a working instructors pass:** it would have to be **search-driven** — per
+session, search a subject, read the faculty bannerIds from *those* live results, and card
+them in the same session — storing the card keyed by a **stable** field (email), since
+bannerId is ephemeral. That's a real rework (email-keyed `instructor` table +
+`/api/instructor` by email + panel lookup by email) **plus** the heaviest live Banner load of
+any pass.
+
+**Decision (2026-06-09): DEFERRED — and the enrichment is low-value, so this is fine.** The
+data students actually want — **instructor name + email — already comes from the section
+search itself** (`searchResults.faculty[].displayName` / `.emailAddress`, stored in
+`section_faculty` and shown in the panel). The contact card adds only **title / department /
+college**, which are **sparse and frequently null** (e.g. real faculty "Kyle M. Berney" has
+`title: null`). So the marginal value doesn't justify a search-driven rework + a big Banner
+hit. The `instructor` table is intentionally **left empty**; the panel renders instructors
+purely from `faculty[]` (the `/api/instructor` route + query remain for a possible future
+email-keyed implementation, but the panel no longer calls them). If it's ever wanted, do the
+search-driven, email-keyed pass described above.
 
 ### Intentionally deferred (lazy / future)
 
