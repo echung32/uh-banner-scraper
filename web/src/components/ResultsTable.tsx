@@ -1,4 +1,5 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useState } from "react";
+import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,7 +11,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { SectionDetails } from "./SectionDetails";
 import type { CourseSection, MeetingTime, SearchResultsResponse } from "@/lib/sis/types";
+
+// Total columns including the leading expand toggle — kept in sync with the
+// header / skeleton / empty-state colSpans below.
+const COLUMN_COUNT = 12;
 
 interface ResultsTableProps {
   results: SearchResultsResponse | null;
@@ -46,11 +52,24 @@ function formatMeetingTime(mt: MeetingTime): string {
 }
 
 function SectionRow({ section }: { section: CourseSection }) {
+  const [expanded, setExpanded] = useState(false);
   const primaryFaculty = section.faculty.find((f) => f.primaryIndicator) ?? section.faculty[0];
   const primaryMeeting = section.meetingsFaculty[0]?.meetingTime;
 
   return (
-    <TableRow>
+    <>
+    <TableRow
+      className="cursor-pointer"
+      onClick={() => setExpanded((v) => !v)}
+      aria-expanded={expanded}
+    >
+      <TableCell className="w-8">
+        <ChevronDown
+          className={`h-4 w-4 text-muted-foreground transition-transform ${
+            expanded ? "" : "-rotate-90"
+          }`}
+        />
+      </TableCell>
       <TableCell className="font-mono text-xs">{section.subject}</TableCell>
       <TableCell className="font-mono font-medium">{section.subjectCourse}</TableCell>
       <TableCell className="text-sm text-muted-foreground">
@@ -91,6 +110,14 @@ function SectionRow({ section }: { section: CourseSection }) {
         )}
       </TableCell>
     </TableRow>
+    {expanded && (
+      <TableRow className="bg-muted/30 hover:bg-muted/30">
+        <TableCell colSpan={COLUMN_COUNT} className="px-6 pt-0 align-top">
+          <SectionDetails section={section} />
+        </TableCell>
+      </TableRow>
+    )}
+    </>
   );
 }
 
@@ -99,7 +126,7 @@ function SkeletonRows() {
     <>
       {Array.from({ length: 5 }).map((_, i) => (
         <TableRow key={i}>
-          {Array.from({ length: 11 }).map((__, j) => (
+          {Array.from({ length: COLUMN_COUNT }).map((__, j) => (
             <TableCell key={j}>
               <Skeleton className="h-4 w-full" />
             </TableCell>
@@ -160,6 +187,7 @@ export function ResultsTable({ results, isLoading, onPageChange }: ResultsTableP
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-8" />
               <TableHead className="w-16">Subj</TableHead>
               <TableHead className="w-24">Course</TableHead>
               <TableHead>Campus</TableHead>
@@ -178,7 +206,7 @@ export function ResultsTable({ results, isLoading, onPageChange }: ResultsTableP
               <SkeletonRows />
             ) : results?.data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={COLUMN_COUNT} className="h-24 text-center text-muted-foreground">
                   No course sections match your search.
                 </TableCell>
               </TableRow>
