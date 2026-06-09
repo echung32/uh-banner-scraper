@@ -35,6 +35,7 @@ sequenceDiagram
     
     rect rgb(240, 245, 255)
         Note over Client,Server: Instructor & Modal Interactions
+        Note right of Client: bannerId 7814 came from the faculty[] of the<br/>search above — it is session-scoped. A stale/<br/>cross-session id here returns HTTP 500.
         Client->>Server: GET /ssb/contactCard/retrieveData?bannerId=7814&termCode=202710 (with Token_B)
         Server-->>Client: 200 OK (JSON Instructor Details)
         
@@ -168,9 +169,22 @@ When interacting with the results grid, additional information is fetched dynami
 ### A. Instructor Contact Card (`GET /ssb/contactCard/retrieveData`)
 Clicking on an instructor's name (which has the class `email` in the results table) queries the contact card endpoint.
 - **Parameters**:
-  - `bannerId` (query, e.g. `7814`): The internal ID of the instructor.
+  - `bannerId` (query, e.g. `7814`): The instructor's id — see the critical caveat below.
   - `termCode` (query, e.g. `202710`): The active academic term.
 - **Response**: A JSON object returning configuration settings for display (`facultyCardPopupConfig`) and instructor profile details (`personData`) including `displayName` and `email`.
+
+> ⚠️ **The `bannerId` is a per-session surrogate token, not a stable identifier — this endpoint will NOT work in isolation.**
+>
+> The `bannerId` found in a search result's `faculty[]` is minted *for that session* (the same instructor gets a different id in a different session). `retrieveData` only succeeds for a `bannerId` that is present in the **same session's most-recent `searchResults` response**. The real UI never calls this cold — it always opens the card from a row that was just searched. So the required flow is:
+>
+> 1. Establish a session (handshake → Token_B, see §1).
+> 2. `GET /ssb/searchResults/searchResults?...` for the subject/course the instructor teaches.
+> 3. Read the instructor's `bannerId` from that response's `faculty[].bannerId`.
+> 4. **Immediately** `GET retrieveData?bannerId=<that id>&termCode=<term>` on the same session.
+>
+> A `bannerId` taken from a different/expired session — or stored and replayed later — fails server-side validation and returns **HTTP 500** (a Grails `ContactCardController` `ValidationException`, surfaced as a 500 by a secondary `returnMap()` defect; the body is an HTML error page, not JSON). This is *not* an outage and *not* a stale-data / missing-header / `termCode` issue — it is purely the session-scoped id. **Verified live 2026-06-09:** the same person was `bannerId=7814` in an earlier capture and `3026` in a fresh session; carding `3026` immediately after a live ICS 111 search returned 200, while replaying any older id returned 500.
+>
+> **Practical consequence:** the card cannot be backfilled from previously-stored bannerIds, and any persisted enrichment must be keyed by a *stable* field (e.g. email). Since `displayName` and `emailAddress` already come back in the `searchResults` `faculty[]` objects, the card only adds `title` / `department` / `college` (frequently null) — low marginal value. (In this repo, instructor enrichment is therefore intentionally deferred and the details panel renders instructors straight from `faculty[]`; see `docs/backfill-history.md`.)
 
 ### B. Course Details Modal Sub-Endpoints
 Clicking on a course title (class `section-details-link` in the table) opens a multi-tab dialog.

@@ -236,7 +236,38 @@ paths:
   /ssb/contactCard/retrieveData:
     get:
       summary: Retrieve Instructor Contact Card
-      description: Fetches details for an instructor (displayName, email, title, etc.).
+      description: >-
+        Fetches a faculty member's contact card (displayName, email, title,
+        department/college).
+
+
+        **CRITICAL — the `bannerId` is a per-session surrogate token, not a
+        stable id.** This endpoint only succeeds for a `bannerId` that is present
+        in the **same session's most-recent `searchResults` response**. The
+        required flow is therefore:
+
+        1. Establish a session (handshake → Token_B).
+
+        2. `GET /ssb/searchResults/searchResults?...` for the subject/course that
+           the instructor teaches.
+
+        3. Read the instructor's `bannerId` from that response's
+           `faculty[].bannerId` (it is freshly minted for this session — the same
+           person gets a different id in a different session).
+
+        4. Immediately `GET retrieveData?bannerId=<that id>&termCode=<term>` on the
+           same session.
+
+
+        A `bannerId` taken from a different/expired session (or stored and replayed
+        later) fails server-side validation and returns **HTTP 500** (a Grails
+        `ContactCardController` `ValidationException`, surfaced as a 500 due to a
+        secondary `returnMap()` defect — there is no machine-readable error body).
+        Consequently the card **cannot be backfilled** from previously-stored
+        bannerIds; any persisted enrichment must be keyed by a stable field such
+        as email. Note that the name + email already arrive in the `searchResults`
+        `faculty[]` objects, so the card only adds title/department/college (often
+        null).
       security:
         - CookieAuth: []
         - CSRFToken: []
@@ -244,6 +275,10 @@ paths:
         - name: bannerId
           in: query
           required: true
+          description: >-
+            Per-session surrogate id of the faculty member, taken from
+            `faculty[].bannerId` in the SAME session's most-recent `searchResults`
+            response. Not stable across sessions; replaying a stale id returns 500.
           schema:
             type: string
             example: '7814'
@@ -260,6 +295,16 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ContactCardResponse'
+        '500':
+          description: >-
+            Returned when `bannerId` is not in the current session's most-recent
+            search results (e.g. a stale/cross-session id). The body is a Grails
+            error HTML page (`ValidationException` / `returnMap()` NoSuchMethod),
+            not JSON.
+          content:
+            text/html:
+              schema:
+                type: string
 
   /ssb/searchResults/getClassDetails:
     post:
@@ -1037,6 +1082,12 @@ components:
       properties:
         bannerId:
           type: string
+          description: >-
+            Per-session surrogate id, valid only within THIS session. Pass it to
+            `/ssb/contactCard/retrieveData` on the same session to open the
+            contact card; it is NOT stable across sessions (the same instructor
+            gets a different id each session) and a replayed id returns 500.
+            `displayName` and `emailAddress` below are the stable, reusable fields.
           example: '10009'
         category:
           type: string
