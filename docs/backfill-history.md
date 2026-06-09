@@ -71,11 +71,44 @@ catalog/text + instructors, `sections=0`) is **deferred to a post-cooldown run**
 Spot-check: a direct live `ICS` search returns `totalCount=206`; remote D1 holds exactly
 206 ICS sections for Fall 2026 — byte-for-byte the pipeline works.
 
-### Outstanding (post-cooldown)
+## Banner rate-limit policy (what we learned) + mitigations
 
-- Finish Spring 2026 subjects 93→270 (re-run `sync?term=202630`).
-- Mop up Fall 2026's throttled tail (re-run `sync?term=202710` — the retry hardening
-  should now carry it through).
-- Run the **details** pass for both terms (`sync-details?term=…&sections=0`) to populate
-  `course` (college/department/description/prereqs → enables the College/Department
-  filters and the details panel's catalog text), `filter_option`, and `instructor`.
+Banner sits behind **nginx** and throttles **silently** — no `429`, no `Retry-After`, no
+`X-RateLimit-*` headers; over-limit requests simply **hang/drop** (probes time out). So
+there's nothing to honor programmatically; the only lever is to stay under it. Observed
+behavior across the runs:
+
+- **Per session:** a single JSESSIONID degrades after a few hundred requests (each subject
+  ≈ 2: `resetDataForm` + `searchResults`). Fall's first run did ~275 subjects on one
+  session and the failures were the **alphabetical tail** (S–W, incl. big subjects like
+  SOC/SPAN) — i.e. the session got throttled partway, not random drops.
+- **Per IP / cumulative:** sustained volume over a ~45-min window (Fall ×2 + Spring +
+  probes) escalated to an **IP-level** block — even fresh handshakes hung — that cleared
+  after a cooldown (~hours).
+
+Mitigations now in the ingest (all configurable):
+- `syncTerm` rotates to a fresh session every `subjectsPerSession` subjects (default 40,
+  `?subjectsPerSession=`) **and** by age, keeping per-session requests ≈ 80.
+- Per-subject **retry ×3 with a fresh handshake + 2 s backoff** (handshake inside the try
+  so a refused one fails only that subject).
+- `delayMs` paces inter-subject requests (use ~200 for backfills).
+- The details passes rotate by request count too (`CATALOG_PER_SESSION`, `ITEMS_PER_SESSION`).
+- Section detail is **lazy** (no eager 6-endpoint-per-CRN pass), removing the heaviest load.
+
+## Outstanding — BLOCKED on Cloudflare token (2026-06-09 ~18:00)
+
+The optimized finishing run (Fall tail mop-up + Spring 93→270 + details pass) is **coded,
+tested (22/22 e2e), and ready**, but **could not run**: the Cloudflare API token in
+`web/.env` now returns `7403` / `9109 — "Cannot use the access token from location:
+<egress-IP>"`. The token is **active and unexpired**; it has an **IP allowlist**, and the
+dev container's egress IP changed to `<egress-IP>` (it was allowlisted earlier, which is
+why the ~14:00 runs worked). **Action required:** add `<egress-IP>` to the token's IP
+filtering (or remove the restriction / supply a non-IP-scoped token). The already-written
+remote data (Fall 8,436 + Spring 3,466 sections) is intact.
+
+Once D1 access is restored, run (Banner was responsive again as of ~17:56):
+- `POST /api/admin/sync?term=202710&delayMs=200&subjectsPerSession=40` (mop Fall tail).
+- `POST /api/admin/sync?term=202630&delayMs=200&subjectsPerSession=40` (finish Spring).
+- `POST /api/admin/sync-details?term=202710&sections=0&delayMs=200` then same for `202630`
+  (populates `course` → College/Department filters + panel text, `filter_option`,
+  `instructor`).
