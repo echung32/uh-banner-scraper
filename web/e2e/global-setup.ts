@@ -29,7 +29,13 @@ function findLocalD1File(): string {
   return join(dir, file);
 }
 
-function icsSection(crn: string, courseNumber: string, seq: string, title: string) {
+function icsSection(
+  crn: string,
+  courseNumber: string,
+  seq: string,
+  title: string,
+  campusDescription = "University of Hawaii at Manoa"
+) {
   return {
     id: Number(crn),
     term: "202710",
@@ -40,7 +46,7 @@ function icsSection(crn: string, courseNumber: string, seq: string, title: strin
     subject: "ICS",
     subjectDescription: "Information & Computer Sciences",
     sequenceNumber: seq,
-    campusDescription: "Manoa",
+    campusDescription,
     scheduleTypeDescription: "Lecture",
     courseTitle: title,
     creditHours: 3,
@@ -70,6 +76,9 @@ const SECTIONS = [
   icsSection("10004", "211", "001", "Intro to Computer Science II"),
   icsSection("10005", "311", "001", "Algorithms"),
   icsSection("10006", "311", "002", "Algorithms"),
+  // A non-Manoa section so the campus filter has something to exclude: the
+  // default UH-Manoa search hides it, "All Campuses" reveals it.
+  icsSection("10007", "101", "001", "Tools for the Information World", "University of Hawaii at Hilo"),
 ];
 
 export default function globalSetup() {
@@ -86,7 +95,11 @@ export default function globalSetup() {
   for (const table of [
     "section_meeting",
     "section_faculty",
+    "section_detail",
     "course_section",
+    "course",
+    "filter_option",
+    "instructor",
     "subject",
     "sync_run",
     "enrollment_snapshot",
@@ -129,6 +142,42 @@ export default function globalSetup() {
       s.seatsAvailable,
       s.openSection ? 1 : 0,
       JSON.stringify(s),
+      now
+    );
+  }
+
+  // Course catalog rows (what a details sync would produce). College/department
+  // are per (campus, course); ICS 311 sits in a different college so the College
+  // filter has something to exclude.
+  const MANOA = "University of Hawaii at Manoa";
+  const NAT_SCI = ["14", "College of Natural Sciences"];
+  const ENGR = ["20", "College of Engineering"];
+  const COURSES: Array<[string, string, string, string, string]> = [
+    [MANOA, "ICS", "111", ...NAT_SCI] as [string, string, string, string, string],
+    [MANOA, "ICS", "141", ...NAT_SCI] as [string, string, string, string, string],
+    [MANOA, "ICS", "211", ...NAT_SCI] as [string, string, string, string, string],
+    [MANOA, "ICS", "311", ...ENGR] as [string, string, string, string, string],
+    ["University of Hawaii at Hilo", "ICS", "101", "30", "College of Natural & Health Sciences"] as [string, string, string, string, string],
+  ];
+  const courseStmt = db.prepare(
+    `INSERT INTO course
+       (term, campus_description, subject, course_number, college_code, college_name,
+        department, department_code, grading_modes, schedule_types, credit_breakdown, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  for (const [campus, subject, courseNumber, collegeCode, collegeName] of COURSES) {
+    courseStmt.run(
+      "202710",
+      campus,
+      subject,
+      courseNumber,
+      collegeCode,
+      collegeName,
+      "Information & Computer Sciences",
+      "ICS",
+      JSON.stringify(["Letter Plus + Minus  G"]),
+      JSON.stringify(["Lecture  LEC"]),
+      JSON.stringify({ creditHours: 3 }),
       now
     );
   }

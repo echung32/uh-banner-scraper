@@ -20,3 +20,6 @@ web/.astro/
 .env
 .env.local
 .env.*.local
+
+# Local Claude Code settings (machine-specific; may contain local paths/usernames)
+.claude/settings.local.json

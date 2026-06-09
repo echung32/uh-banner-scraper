@@ -280,6 +280,246 @@ export async function getEnrollmentInfo(
   };
 }
 
+/**
+ * The Banner `get_*` autocomplete kinds that back filter dropdowns. Each is
+ * served at `/ssb/classSearch/get_<kind>` and returns `[{code, description}]`,
+ * the same shape getSubjects parses. (`subject` is fetched separately by
+ * getSubjects since the ingestion enumerates it.)
+ */
+export type FilterKind =
+  | "campus"
+  | "college"
+  | "department"
+  | "instructionalMethod"
+  | "attribute"
+  | "partOfTerm"
+  | "scheduleType"
+  | "level"
+  | "session"
+  | "building";
+
+/** Fetches one canonical filter-option list for a term (Token_B). */
+export async function getFilterOptions(
+  session: SisSession,
+  termCode: string,
+  kind: FilterKind
+): Promise<AutocompleteItem[]> {
+  const params = new URLSearchParams({
+    searchTerm: "",
+    term: termCode,
+    offset: "1",
+    max: "500",
+    uniqueSessionId: session.uniqueSessionId,
+    _: String(Date.now()),
+  });
+
+  const res = await fetch(
+    sisUrl(`/ssb/classSearch/get_${kind}?${params.toString()}`),
+    {
+      method: "GET",
+      headers: commonHeaders(sessionCookieString(session), session.tokenB),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`get_${kind} failed: ${res.status} ${res.statusText}`);
+  }
+
+  const json = (await res.json()) as Array<{ code: string; description: string }>;
+  return json.map((item) => ({ code: item.code, description: item.description }));
+}
+
+/**
+ * Fetches the catalog-details HTML fragment for a section (Token_B). Despite the
+ * "Section" in the Banner endpoint name, the payload is catalog-level (academic
+ * College, Department, grading modes, catalog schedule types) — shared by every
+ * section of the course. Returns the raw fragment; parsing lives in
+ * `lib/sis/parse/catalogDetails`.
+ */
+export async function getCatalogDetails(
+  session: SisSession,
+  term: string,
+  courseReferenceNumber: string
+): Promise<string> {
+  const body = new URLSearchParams({ term, courseReferenceNumber });
+
+  const res = await fetch(sisUrl("/ssb/searchResults/getSectionCatalogDetails"), {
+    method: "POST",
+    headers: {
+      ...commonHeaders(sessionCookieString(session), session.tokenB),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    throw new Error(
+      `getSectionCatalogDetails failed: ${res.status} ${res.statusText}`
+    );
+  }
+
+  return res.text();
+}
+
+/** Shared POST for the per-section detail fragments (term+CRN → HTML string). */
+async function postSectionFragment(
+  session: SisSession,
+  term: string,
+  courseReferenceNumber: string,
+  endpoint: string
+): Promise<string> {
+  const body = new URLSearchParams({ term, courseReferenceNumber });
+  const res = await fetch(sisUrl(`/ssb/searchResults/${endpoint}`), {
+    method: "POST",
+    headers: {
+      ...commonHeaders(sessionCookieString(session), session.tokenB),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+  if (!res.ok) {
+    throw new Error(`${endpoint} failed: ${res.status} ${res.statusText}`);
+  }
+  return res.text();
+}
+
+/** Course catalog description HTML fragment (parse with lib/sis/parse/text). */
+export function getCourseDescription(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getCourseDescription");
+}
+
+/** Catalog prerequisites HTML fragment. */
+export function getPrerequisites(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getSectionPrerequisites");
+}
+
+/** Corequisites HTML fragment. */
+export function getCorequisites(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getCorequisites");
+}
+
+/** Enrollment restrictions HTML fragment. */
+export function getRestrictions(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getRestrictions");
+}
+
+/** Course/lab fees HTML fragment. */
+export function getFees(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getFees");
+}
+
+/** Cross-listed sibling sections HTML fragment. */
+export function getCrossListSections(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getXlstSections");
+}
+
+/** Linked sections HTML fragment. */
+export function getLinkedSections(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getLinkedSections");
+}
+
+/** Bookstore links HTML fragment. */
+export function getBookstore(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getSectionBookstoreDetails");
+}
+
+/** Syllabus HTML fragment. */
+export function getSyllabus(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getSyllabus");
+}
+
+export interface InstructorCard {
+  bannerId: string;
+  displayName: string | null;
+  title: string | null;
+  department: string | null;
+  college: string | null;
+  email: string | null;
+  telephone: string | null;
+  raw: unknown;
+}
+
+/**
+ * Faculty contact card (Token_B, GET, JSON). Name/email overlap with the
+ * section's `faculty[]`; the card adds title / department / college / phone when
+ * present. NOTE: the live `bannerId` (from the section's `faculty[]`) must be
+ * used — older ids 500. `deptAndCollegeInformation` is an array of objects (a
+ * nested `college` + optional `department`), not a string.
+ */
+export async function getContactCard(
+  session: SisSession,
+  bannerId: string,
+  termCode: string
+): Promise<InstructorCard> {
+  const params = new URLSearchParams({ bannerId, termCode });
+  const res = await fetch(
+    sisUrl(`/ssb/contactCard/retrieveData?${params.toString()}`),
+    { method: "GET", headers: commonHeaders(sessionCookieString(session), session.tokenB) }
+  );
+  if (!res.ok) {
+    throw new Error(`contactCard failed: ${res.status} ${res.statusText}`);
+  }
+  const json = (await res.json()) as {
+    data?: { personData?: Record<string, any> };
+  };
+  const p = json.data?.personData ?? {};
+  const dci = Array.isArray(p.deptAndCollegeInformation)
+    ? p.deptAndCollegeInformation[0]
+    : null;
+  const college = (dci?.college?.description as string) ?? null;
+  const department =
+    (dci?.department?.description as string) ??
+    (typeof p.deptAndCollegeInformation === "string"
+      ? (p.deptAndCollegeInformation as string)
+      : null);
+  return {
+    bannerId: String(p.bannerId ?? bannerId),
+    displayName: (p.displayName as string) ?? null,
+    title: (p.title as string) ?? null,
+    department,
+    college,
+    email: (p.email as string) ?? null,
+    telephone: (p.telephone as string) ?? null,
+    raw: p,
+  };
+}
+
 export async function searchCourses(
   session: SisSession,
   params: SearchParams

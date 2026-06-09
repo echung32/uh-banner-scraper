@@ -30,6 +30,13 @@ async function runSearch(page: Page, subject: string, courseNumber: string) {
   await searchButton.click();
 }
 
+/** Picks an option from one of the form's selects by combobox + option label. */
+async function selectOption(page: Page, combobox: string, label: string) {
+  await page.getByRole("combobox", { name: combobox }).click();
+  await page.getByRole("option", { name: label, exact: true }).click();
+}
+const selectCampus = (page: Page, label: string) => selectOption(page, "Campus", label);
+
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
   // The term <select> is populated from the mock's getTerms; wait for the app.
@@ -46,6 +53,46 @@ test("subject search returns matching sections", async ({ page }) => {
   // The mock catalog has 6 ICS sections total.
   expect(await totalSections(page)).toBe(6);
   await expect(page.getByRole("cell", { name: "ICS 111" }).first()).toBeVisible();
+});
+
+test("campus filter defaults to UH Manoa and widens to all campuses", async ({ page }) => {
+  // Default campus is UH Manoa, so only the 6 Manoa ICS sections show — the
+  // Hilo section is hidden — and the column reflects it.
+  await runSearch(page, "ICS", "");
+  expect(await totalSections(page)).toBe(6);
+  await expect(
+    page.getByRole("cell", { name: "University of Hawaii at Manoa" }).first()
+  ).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "University of Hawaii at Hilo" })
+  ).toHaveCount(0);
+
+  // Widen to all campuses → the Hilo section appears (7 total).
+  await selectCampus(page, "All Campuses");
+  await runSearch(page, "ICS", "");
+  await expect(page.getByText(/of 7 sections/)).toBeVisible();
+  await expect(
+    page.getByRole("cell", { name: "University of Hawaii at Hilo" })
+  ).toBeVisible();
+});
+
+test("college filter narrows results to the selected academic college", async ({ page }) => {
+  // Default campus (Manoa): 6 ICS sections across courses 111/141/211 (Natural
+  // Sciences) and 311 (Engineering, per the seeded catalog).
+  await runSearch(page, "ICS", "");
+  expect(await totalSections(page)).toBe(6);
+
+  // Filter to College of Natural Sciences → excludes the 2 ICS 311 sections.
+  await selectOption(page, "College", "College of Natural Sciences");
+  await runSearch(page, "ICS", "");
+  await expect(page.getByText(/of 4 sections/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: "ICS 311" })).toHaveCount(0);
+
+  // Switch to College of Engineering → only the 2 ICS 311 sections.
+  await selectOption(page, "College", "College of Engineering");
+  await runSearch(page, "ICS", "");
+  await expect(page.getByText(/of 2 sections/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: "ICS 311" })).toHaveCount(2);
 });
 
 test("course number filter narrows the results", async ({ page }) => {

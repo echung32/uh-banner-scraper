@@ -29,6 +29,58 @@ const SUBJECTS = [
   { code: "MATH", description: "Mathematics" },
 ];
 
+// Canonical filter-option menus, served by /ssb/classSearch/get_<kind>. Small
+// fixtures keyed by kind; the details ingest persists these into filter_option.
+const FILTER_OPTIONS = {
+  campus: [
+    { code: "MAN", description: "University of Hawaii at Manoa" },
+    { code: "HIL", description: "University of Hawaii at Hilo" },
+  ],
+  college: [
+    { code: "14", description: "College of Natural Sciences" },
+    { code: "20", description: "College of Arts & Sciences" },
+  ],
+  department: [
+    { code: "ICS", description: "Information & Computer Sciences" },
+    { code: "MATH", description: "Mathematics" },
+  ],
+  instructionalMethod: [{ code: "INP", description: "In Person" }],
+  attribute: [],
+  partOfTerm: [{ code: "1", description: "Full Term" }],
+  scheduleType: [{ code: "LEC", description: "Lecture" }],
+  level: [{ code: "UG", description: "Undergraduate" }],
+  session: [],
+  building: [{ code: "POST", description: "Pacific Ocean Science & Tech" }],
+};
+
+// Course-level catalog fragment (mirrors getSectionCatalogDetails). College and
+// department vary by subject so the ingest's per-course parse can be asserted.
+function catalogHtml(subject) {
+  const college =
+    subject === "ICS"
+      ? "MAN-College of Natural Sciences  14"
+      : "MAN-College of Arts &amp; Sciences  20";
+  const dept =
+    subject === "ICS"
+      ? "Information&amp; Computer Sciences  ICS"
+      : "Mathematics  MATH";
+  return `<section aria-labelledby="catalog">
+    <span class="status-bold">Title:</span>Course Title<br/>
+    <span class="status-bold">College:</span>
+        <span>${college}</span>
+        <br/>
+    <span class="status-bold">Department:</span>
+        <span>${dept}</span>
+        <br/>
+    <span class="status-bold">Hours:</span><br/>
+    <span class="indent-left">Credit Hours:</span><span class="credit-hours-direction">3  </span><br/>
+    <span class="status-bold">Grading Modes:</span>
+    <div class="indent-left">Audit  A<br/>Letter Plus + Minus  G</div>
+    <span class="status-bold">Schedule Types:</span>
+    <div class="indent-left">Lecture  LEC</div>
+  </section>`;
+}
+
 // A tiny catalog. `term` is filled in per request so the same catalog can be
 // served for any requested term.
 function section(crn, subject, courseNumber, sequenceNumber, title) {
@@ -77,6 +129,19 @@ const CATALOG = [
   section("20001", "MATH", "241", "001", "Calculus I"),
   section("20002", "MATH", "242", "001", "Calculus II"),
   section("20003", "MATH", "243", "001", "Calculus III"),
+];
+
+// One section has faculty so the instructor (contact-card) pass has a banner_id.
+CATALOG.find((s) => s.courseReferenceNumber === "10005").faculty = [
+  {
+    bannerId: "9001",
+    category: "01",
+    courseReferenceNumber: "10005",
+    displayName: "Jane Instructor",
+    emailAddress: "jane@hawaii.edu",
+    primaryIndicator: true,
+    term: "",
+  },
 ];
 
 // Per-session server-side state, keyed by JSESSIONID.
@@ -153,6 +218,146 @@ const server = createServer(async (req, res) => {
   // Subject autocomplete list (ingestion enumerates this).
   if (path === "/ssb/classSearch/get_subject") {
     return sendJson(res, 200, SUBJECTS);
+  }
+
+  // Filter-option menus: /ssb/classSearch/get_<kind>.
+  if (path.startsWith("/ssb/classSearch/get_")) {
+    const kind = path.slice("/ssb/classSearch/get_".length);
+    if (kind in FILTER_OPTIONS) return sendJson(res, 200, FILTER_OPTIONS[kind]);
+  }
+
+  // Course-level catalog fragment (details ingest, per representative CRN).
+  if (path === "/ssb/searchResults/getSectionCatalogDetails") {
+    const body = await readBody(req);
+    const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
+    const subject = CATALOG.find((s) => s.courseReferenceNumber === crn)?.subject ?? "ICS";
+    return sendHtml(res, 200, catalogHtml(subject));
+  }
+
+  // Course-level text fragments (Slice 2 ingest).
+  if (
+    path === "/ssb/searchResults/getCourseDescription" ||
+    path === "/ssb/searchResults/getSectionPrerequisites" ||
+    path === "/ssb/searchResults/getCorequisites"
+  ) {
+    const body = await readBody(req);
+    const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
+    const sec = CATALOG.find((s) => s.courseReferenceNumber === crn);
+    if (path.endsWith("getCourseDescription")) {
+      return sendHtml(
+        res,
+        200,
+        `<section aria-labelledby="courseDescription">
+          <!--display course description-->
+          ${sec ? sec.courseTitle + ". An introductory course." : ""}
+          <br/>
+        </section>`
+      );
+    }
+    if (path.endsWith("getSectionPrerequisites")) {
+      // Only ICS 311 has prereqs, to exercise both branches.
+      const hasPrereq = sec && sec.subject === "ICS" && sec.courseNumber === "311";
+      return sendHtml(
+        res,
+        200,
+        `<section aria-labelledby="preReqs"><h3>Catalog Prerequisites</h3>
+          ${hasPrereq ? "<table><tbody><tr><td><pre>Prerequisites:ICS 211 Completed w/C grade</pre></td></tr></tbody></table>" : "No prerequisite information available."}
+        </section>`
+      );
+    }
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="coReqs"><h3>Corequisites</h3>
+        No corequisite course information available.
+      </section>`
+    );
+  }
+
+  // Section-level detail fragments (Slice 3 ingest).
+  if (path === "/ssb/searchResults/getRestrictions") {
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="restrictions">
+        <span class="status-bold">Must be enrolled in one of the following Campuses:</span><br/>
+        <span class="detail-popup-indentation">University of Hawaii at Manoa (MAN)</span><br/>
+      </section>`
+    );
+  }
+  if (path === "/ssb/searchResults/getFees") {
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="fees"><table class="basePreqTable">
+        <thead><tr><th>Level</th><th>Description</th><th>Amount</th></tr></thead>
+        <tbody><tr><td></td><td>Course Fee</td><td class="courseFeeAmount">$50.00</td></tr></tbody>
+      </table></section>`
+    );
+  }
+  if (path === "/ssb/searchResults/getXlstSections") {
+    const body = await readBody(req);
+    const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
+    // CRN 10001 (ICS 111 §001) is cross-listed with 10002.
+    const rows = crn === "10001"
+      ? "<tr><td>10002</td><td>ICS</td><td>111</td><td>Intro</td><td>002</td></tr>"
+      : "";
+    return sendHtml(
+      res,
+      200,
+      rows
+        ? `<section aria-labelledby="xlstSections"><table><tbody>${rows}</tbody></table></section>`
+        : `<section aria-labelledby="xlstSections">No cross-list information available.</section>`
+    );
+  }
+  if (path === "/ssb/searchResults/getLinkedSections") {
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="linked">No linked course information available.</section>`
+    );
+  }
+  if (path === "/ssb/searchResults/getSectionBookstoreDetails") {
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="bookstore"><div class="indent-left">
+        <a href="https://hawaii-manoa.verbacompare.com/" target="_blank">Manoa.Bookstore</a><br/>
+      </div></section>`
+    );
+  }
+  if (path === "/ssb/searchResults/getSyllabus") {
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="syllabus">No Syllabus Information Available</section>`
+    );
+  }
+
+  // Instructor contact card (Slice 4 ingest) — GET ?bannerId=&termCode=.
+  if (path === "/ssb/contactCard/retrieveData") {
+    const bannerId = url.searchParams.get("bannerId") ?? "";
+    // Mirrors the live shape: deptAndCollegeInformation is an array with a
+    // nested college (and optional department), not a string.
+    return sendJson(res, 200, {
+      data: {
+        personData: {
+          displayName: "Jane Instructor",
+          title: "Associate Professor",
+          deptAndCollegeInformation: [
+            {
+              college: { code: "14", description: "MAN-College of Natural Sciences" },
+              department: { description: "Information & Computer Sciences" },
+            },
+          ],
+          email: "jane@hawaii.edu",
+          telephone: null,
+          address: null,
+          bannerId,
+        },
+        message: "",
+      },
+    });
   }
 
   // Per-section enrollment fragment (seat refresh path). Returns live-ish seats
