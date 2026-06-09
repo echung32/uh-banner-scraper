@@ -25,10 +25,16 @@ const SESSION_MAX_AGE_MS = 27 * 60 * 1000; // re-handshake before the ~30-min se
 const DEFAULT_SUBJECT_DELAY_MS = 250; // throttle between subjects to be polite to Banner
 const SUBJECT_MAX_ATTEMPTS = 3; // re-handshake + retry a subject before giving up
 const RETRY_BACKOFF_MS = 2000; // wait before a re-handshake so we don't amplify throttling
+// Banner silently throttles a session after a few hundred requests (each subject
+// is ~2: resetDataForm + searchResults), so rotate to a fresh session well before
+// that. Rotating too often re-triggers handshake throttling, so keep it modest.
+const DEFAULT_SUBJECTS_PER_SESSION = 40;
 
 export interface SyncOptions {
   /** Delay between subjects (ms). Higher = gentler on Banner during backfill. */
   subjectDelayMs?: number;
+  /** Re-handshake after this many subjects to dodge per-session throttling. */
+  subjectsPerSession?: number;
   /** Progress callback. */
   log?: (msg: string) => void;
 }
@@ -74,12 +80,14 @@ export async function syncTerm(
 ): Promise<SyncResult> {
   const log = options.log ?? (() => {});
   const delay = options.subjectDelayMs ?? DEFAULT_SUBJECT_DELAY_MS;
+  const perSession = options.subjectsPerSession ?? DEFAULT_SUBJECTS_PER_SESSION;
   const startedAt = Date.now();
   const run = await startSyncRun(db, termCode, "full", startedAt);
 
   let session = await establishSession(termCode);
   let totalSections = 0;
   let subjectsDone = 0;
+  let sinceHandshake = 0;
   let status: "ok" | "partial" | "error" = "ok";
 
   try {
@@ -88,9 +96,12 @@ export async function syncTerm(
     log(`[${termCode}] ${subjects.length} subjects`);
 
     for (const subject of subjects) {
-      if (Date.now() - session.establishedAt > SESSION_MAX_AGE_MS) {
+      // Rotate the session by request count (per-session throttle) AND by age.
+      if (sinceHandshake >= perSession || Date.now() - session.establishedAt > SESSION_MAX_AGE_MS) {
         session = await establishSession(termCode);
+        sinceHandshake = 0;
       }
+      sinceHandshake += 1;
       // Retry each subject a few times, re-establishing the session between
       // attempts. A long single-session run (hundreds of sequential searches)
       // eventually gets throttled by Banner — the failures cluster in the tail —

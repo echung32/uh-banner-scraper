@@ -53,6 +53,24 @@ import {
 
 const SESSION_MAX_AGE_MS = 27 * 60 * 1000;
 const DEFAULT_COURSE_DELAY_MS = 250; // throttle between per-course catalog fetches
+// Banner silently throttles a session after a few hundred requests, so rotate to
+// a fresh session by request count too (not just age). Budgeted as ~requests per
+// session ÷ requests per item: catalog = 4 fetches/course, instructors = 1/card.
+const CATALOG_PER_SESSION = 25; // ~100 requests
+const ITEMS_PER_SESSION = 80;
+
+/** Re-handshakes if the session is too old or has done too many requests. */
+async function rotateIfNeeded(
+  session: SisSession,
+  term: string,
+  count: number,
+  perSession: number
+): Promise<SisSession> {
+  if (count >= perSession || Date.now() - session.establishedAt > SESSION_MAX_AGE_MS) {
+    return establishSession(term);
+  }
+  return session;
+}
 
 /** The filter-option lists we persist (subject is handled by the full sync). */
 export const FILTER_KINDS: FilterKind[] = [
@@ -149,11 +167,12 @@ async function syncCourseCatalog(
     .all<{ campus: string; subject: string; courseNumber: string; crn: string }>();
 
   let done = 0;
+  let since = 0;
   let status: "ok" | "partial" = "ok";
   for (const c of courses) {
-    if (Date.now() - session.establishedAt > SESSION_MAX_AGE_MS) {
-      session = await establishSession(term);
-    }
+    const rotated = await rotateIfNeeded(session, term, since, CATALOG_PER_SESSION);
+    if (rotated !== session) { session = rotated; since = 0; }
+    since += 1;
     try {
       // Catalog + the three text fragments, all per (campus, course).
       const [catalogHtml, descHtml, prereqHtml, coreqHtml] = await Promise.all([
@@ -209,11 +228,13 @@ async function syncSectionDetails(
     .all<{ crn: string }>();
 
   let done = 0;
+  let since = 0;
   let status: "ok" | "partial" = "ok";
   for (const s of sections) {
-    if (Date.now() - session.establishedAt > SESSION_MAX_AGE_MS) {
-      session = await establishSession(term);
-    }
+    // 6 fetches/CRN, so rotate roughly every ~16 CRNs to stay near ~100 requests.
+    const rotated = await rotateIfNeeded(session, term, since, Math.ceil(CATALOG_PER_SESSION / 1.5));
+    if (rotated !== session) { session = rotated; since = 0; }
+    since += 1;
     try {
       const [restr, fees, xlst, linked, bookstore, syllabus] = await Promise.all([
         getRestrictions(session, term, s.crn),
@@ -271,11 +292,12 @@ async function syncInstructors(
     .all<{ banner_id: string }>();
 
   let done = 0;
+  let since = 0;
   let status: "ok" | "partial" = "ok";
   for (const r of ids) {
-    if (Date.now() - session.establishedAt > SESSION_MAX_AGE_MS) {
-      session = await establishSession(term);
-    }
+    const rotated = await rotateIfNeeded(session, term, since, ITEMS_PER_SESSION);
+    if (rotated !== session) { session = rotated; since = 0; }
+    since += 1;
     try {
       const card = await getContactCard(session, r.banner_id, term);
       await upsertInstructor(db, card, Date.now());
