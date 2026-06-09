@@ -9,6 +9,8 @@ __pycache__/
 .yarn/cache/
 .yarn/install-state.gz
 node_modules/
+.pnp.cjs
+.pnp.loader.mjs
 
 # Web app build (also covered by web/.gitignore)
 web/dist/
