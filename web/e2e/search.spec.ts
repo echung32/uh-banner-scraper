@@ -95,6 +95,37 @@ test("college filter narrows results to the selected academic college", async ({
   await expect(page.getByRole("cell", { name: "ICS 311" })).toHaveCount(2);
 });
 
+test("expanding a section row shows catalog, lazily-fetched detail, and instructor", async ({
+  page,
+}) => {
+  await runSearch(page, "ICS", "");
+  expect(await totalSections(page)).toBe(6);
+
+  // The first row is ICS 111 §001 (CRN 10001, tiebreak by crn). Click it to
+  // expand the details panel.
+  await page.getByRole("cell", { name: "ICS 111" }).first().click();
+
+  // Catalog facts come from the seeded `course` row (read path, D1).
+  await expect(
+    page.getByText("College of Natural Sciences").last()
+  ).toBeVisible();
+
+  // Instructor card comes from the seeded `instructor` row (read path, D1). The
+  // title is panel-only (the table column shows just the name), so it's a clean
+  // signal the card rendered.
+  await expect(page.getByText("Associate Professor")).toBeVisible();
+
+  // Section detail is NOT seeded — it's fetched live from the mock SIS on first
+  // view and stored (lazy cache-on-miss). The mock serves a $50 fee and marks
+  // CRN 10001 cross-listed with 10002.
+  await expect(page.getByText("$50.00")).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("10002", { exact: true })).toBeVisible();
+
+  // Collapsing hides the panel again.
+  await page.getByRole("cell", { name: "ICS 111" }).first().click();
+  await expect(page.getByText("Associate Professor")).toHaveCount(0);
+});
+
 test("course number filter narrows the results", async ({ page }) => {
   // First search: subject only.
   await runSearch(page, "ICS", "");
