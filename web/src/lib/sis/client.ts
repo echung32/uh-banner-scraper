@@ -143,6 +143,27 @@ function sessionCookieString(session: SisSession): string {
     : `JSESSIONID=${session.jsessionId}`;
 }
 
+/**
+ * Clears the server-side search form state for the session.
+ *
+ * Banner SSB9 stores the previous search's criteria server-side; a pooled
+ * session (see session.ts) therefore "remembers" the last search. Without this
+ * reset, a subsequent search reuses the stale criteria and silently ignores
+ * changed filters such as `txt_courseNumber`. The real UI issues this same
+ * `POST /classSearch/resetDataForm` before every fresh search (see
+ * scripts/intercepted_calls.json). Returns the literal string `"true"`.
+ */
+export async function resetSearchForm(session: SisSession): Promise<void> {
+  const res = await fetch(sisUrl("/ssb/classSearch/resetDataForm"), {
+    method: "POST",
+    headers: commonHeaders(sessionCookieString(session), session.tokenB),
+  });
+
+  if (!res.ok) {
+    throw new Error(`resetDataForm failed: ${res.status} ${res.statusText}`);
+  }
+}
+
 export async function getTerms(
   session: Pick<SisSession, "jsessionId" | "bigipCookie" | "tokenA" | "uniqueSessionId">
 ): Promise<AutocompleteItem[]> {
@@ -179,6 +200,10 @@ export async function searchCourses(
   params: SearchParams
 ): Promise<SearchResultsResponse> {
   const cookieStr = sessionCookieString(session);
+
+  // Banner retains the prior search's criteria server-side on a reused session,
+  // so clear the form first or changed filters (e.g. course number) are ignored.
+  await resetSearchForm(session);
 
   const query = new URLSearchParams({
     txt_term: params.term,
