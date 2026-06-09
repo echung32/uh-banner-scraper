@@ -15,10 +15,15 @@ import {
   type MeetingRow,
 } from "./mappers";
 
-// Keep chunks small so the combined bound-parameter count stays well under
-// SQLite/D1 limits regardless of backend.
-const SECTION_CHUNK = 15;
-const CHILD_CHUNK = 40;
+// Cloudflare's D1 REST /query endpoint caps a statement at 100 bound parameters
+// ("too many SQL variables"), so a multi-row INSERT must keep rows × columns ≤
+// 100. The chunk size is therefore derived from each table's column count (not a
+// fixed row count) — e.g. a 23-column section row allows only 4 rows per insert.
+const D1_MAX_PARAMS = 100;
+
+function rowsPerChunk(columnCount: number): number {
+  return Math.max(1, Math.floor(D1_MAX_PARAMS / columnCount));
+}
 
 function chunk<T>(items: T[], size: number): T[][] {
   const out: T[][] = [];
@@ -85,13 +90,13 @@ export async function replaceSubjectSections(
   const facultyRows = sections.flatMap(sectionToFacultyRows);
   const meetingRows = sections.flatMap(sectionToMeetingRows);
 
-  for (const part of chunk(sectionRows, SECTION_CHUNK)) {
+  for (const part of chunk(sectionRows, rowsPerChunk(SECTION_COLUMNS.length))) {
     await db.batch([insertStatement(db, "course_section", SECTION_COLUMNS, part)]);
   }
-  for (const part of chunk(facultyRows, CHILD_CHUNK)) {
+  for (const part of chunk(facultyRows, rowsPerChunk(FACULTY_COLUMNS.length))) {
     await db.batch([insertStatement(db, "section_faculty", FACULTY_COLUMNS, part)]);
   }
-  for (const part of chunk(meetingRows, CHILD_CHUNK)) {
+  for (const part of chunk(meetingRows, rowsPerChunk(MEETING_COLUMNS.length))) {
     await db.batch([insertStatement(db, "section_meeting", MEETING_COLUMNS, part)]);
   }
 
