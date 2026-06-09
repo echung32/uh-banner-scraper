@@ -17,19 +17,31 @@ const BASE = "/StudentRegistrationSsb";
 const TOKEN_A = "tokenA-00000000-aaaa-aaaa-aaaa-000000000000";
 const TOKEN_B = "tokenB-11111111-bbbb-bbbb-bbbb-111111111111";
 
-const TERMS = [{ code: "202710", description: "Fall 2026" }];
+// 202710 (Fall 2026) is used by the seeded read-path tests; 202730 (Spring 2026)
+// is synced live from this mock by the ingestion test (ingest.spec.ts).
+const TERMS = [
+  { code: "202730", description: "Spring 2026" },
+  { code: "202710", description: "Fall 2026" },
+];
 
-// A tiny ICS catalog: 6 sections total, of which 2 are course number 111.
-function section(crn, courseNumber, sequenceNumber, title) {
+const SUBJECTS = [
+  { code: "ICS", description: "Information & Computer Sciences" },
+  { code: "MATH", description: "Mathematics" },
+];
+
+// A tiny catalog. `term` is filled in per request so the same catalog can be
+// served for any requested term.
+function section(crn, subject, courseNumber, sequenceNumber, title) {
   return {
     id: Number(crn),
-    term: "202710",
-    termDesc: "Fall 2026",
+    term: "",
+    termDesc: null,
     courseReferenceNumber: crn,
     partOfTerm: "1",
     courseNumber,
-    subject: "ICS",
-    subjectDescription: "Information & Computer Sciences",
+    subject,
+    subjectDescription:
+      subject === "ICS" ? "Information & Computer Sciences" : "Mathematics",
     sequenceNumber,
     campusDescription: "Manoa",
     scheduleTypeDescription: "Lecture",
@@ -46,7 +58,7 @@ function section(crn, courseNumber, sequenceNumber, title) {
     openSection: true,
     linkIdentifier: null,
     isSectionLinked: false,
-    subjectCourse: `ICS ${courseNumber}`,
+    subjectCourse: `${subject} ${courseNumber}`,
     faculty: [],
     meetingsFaculty: [],
     reservedSeatSummary: null,
@@ -54,13 +66,17 @@ function section(crn, courseNumber, sequenceNumber, title) {
   };
 }
 
+// 6 ICS sections (2 are course number 111) + 3 MATH sections.
 const CATALOG = [
-  section("10001", "111", "001", "Intro to Computer Science I"),
-  section("10002", "111", "002", "Intro to Computer Science I"),
-  section("10003", "141", "001", "Foundations I"),
-  section("10004", "211", "001", "Intro to Computer Science II"),
-  section("10005", "311", "001", "Algorithms"),
-  section("10006", "311", "002", "Algorithms"),
+  section("10001", "ICS", "111", "001", "Intro to Computer Science I"),
+  section("10002", "ICS", "111", "002", "Intro to Computer Science I"),
+  section("10003", "ICS", "141", "001", "Foundations I"),
+  section("10004", "ICS", "211", "001", "Intro to Computer Science II"),
+  section("10005", "ICS", "311", "001", "Algorithms"),
+  section("10006", "ICS", "311", "002", "Algorithms"),
+  section("20001", "MATH", "241", "001", "Calculus I"),
+  section("20002", "MATH", "242", "001", "Calculus II"),
+  section("20003", "MATH", "243", "001", "Calculus III"),
 ];
 
 // Per-session server-side state, keyed by JSESSIONID.
@@ -91,7 +107,15 @@ function sendHtml(res, status, html, extraHeaders = {}) {
   res.end(html);
 }
 
-const server = createServer((req, res) => {
+function readBody(req) {
+  return new Promise((resolve) => {
+    let data = "";
+    req.on("data", (chunk) => (data += chunk));
+    req.on("end", () => resolve(data));
+  });
+}
+
+const server = createServer(async (req, res) => {
   const url = new URL(req.url, `http://localhost:${PORT}`);
   const path = url.pathname.startsWith(BASE) ? url.pathname.slice(BASE.length) : url.pathname;
 
@@ -126,6 +150,34 @@ const server = createServer((req, res) => {
     return sendJson(res, 200, TERMS);
   }
 
+  // Subject autocomplete list (ingestion enumerates this).
+  if (path === "/ssb/classSearch/get_subject") {
+    return sendJson(res, 200, SUBJECTS);
+  }
+
+  // Per-section enrollment fragment (seat refresh path). Returns live-ish seats
+  // derived from the CRN so the refresh test can assert a changed value.
+  if (path === "/ssb/searchResults/getEnrollmentInfo") {
+    const body = await readBody(req);
+    const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "0";
+    const max = 40;
+    const actual = 35; // differs from the seeded enrollment (30) so updates show
+    const avail = max - actual;
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="enrollmentInfo">
+        <span class="status-bold">Enrollment Actual:</span> <span dir="ltr">${actual}</span><br/>
+        <span class="status-bold">Enrollment Maximum:</span> <span dir="ltr">${max}</span><br/>
+        <span class="status-bold">Enrollment Seats Available:</span> <span dir="ltr">${avail}</span><br/>
+        <hr/>
+        <span class="status-bold">Waitlist Capacity:</span> <span dir="ltr">0</span><br/>
+        <span class="status-bold">Waitlist Actual:</span> <span dir="ltr">0</span><br/>
+        <span class="status-bold">Waitlist Seats Available:</span> <span dir="ltr">0</span><br/>
+      </section>`
+    );
+  }
+
   // Reset the server-side search form — the fix under test calls this.
   if (path === "/ssb/classSearch/resetDataForm") {
     const session = getSession(req);
@@ -148,11 +200,12 @@ const server = createServer((req, res) => {
     }
     const effective = session.storedCriteria;
 
+    const term = url.searchParams.get("txt_term") ?? "202710";
     const data = CATALOG.filter(
       (s) =>
         s.subject === effective.subject &&
         (!effective.courseNumber || s.courseNumber === effective.courseNumber)
-    );
+    ).map((s) => ({ ...s, term, termDesc: null }));
 
     const pageOffset = Number(url.searchParams.get("pageOffset") ?? "0");
     const pageMaxSize = Number(url.searchParams.get("pageMaxSize") ?? "10");

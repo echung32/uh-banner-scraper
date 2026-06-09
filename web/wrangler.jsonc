@@ -1,0 +1,17 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "uh-sis-web",
+  "compatibility_date": "2026-06-01",
+  "compatibility_flags": ["nodejs_compat"],
+  // D1 is used now via the HTTP-API shim (lib/db/client.ts) on the Node host, and
+  // by `wrangler d1` tooling for migrations. It becomes the native deploy binding
+  // in the Workers migration (docs/plans/workers-migration.md).
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "uh_sis",
+      "database_id": "04eae271-3025-48b5-8152-8fcaa9b5bbdc",
+      "migrations_dir": "./migrations"
+    }
+  ]
+}

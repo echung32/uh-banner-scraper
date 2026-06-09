@@ -195,6 +195,91 @@ export async function getTerms(
   return json.map((item) => ({ code: item.code, description: item.description }));
 }
 
+/**
+ * Lists all subjects for the session's locked term — the enumeration source the
+ * ingestion job iterates (Banner requires a subject per search). Same empty
+ * `searchTerm` + large `max` autocomplete pattern as getTerms, but on the
+ * classSearch page so it uses Token_B.
+ */
+export async function getSubjects(
+  session: SisSession,
+  termCode: string
+): Promise<AutocompleteItem[]> {
+  const params = new URLSearchParams({
+    searchTerm: "",
+    term: termCode,
+    offset: "1",
+    max: "500",
+    uniqueSessionId: session.uniqueSessionId,
+    _: String(Date.now()),
+  });
+
+  const res = await fetch(
+    sisUrl(`/ssb/classSearch/get_subject?${params.toString()}`),
+    {
+      method: "GET",
+      headers: commonHeaders(sessionCookieString(session), session.tokenB),
+    }
+  );
+
+  if (!res.ok) {
+    throw new Error(`getSubjects failed: ${res.status} ${res.statusText}`);
+  }
+
+  const json = await res.json() as Array<{ code: string; description: string }>;
+  return json.map((item) => ({ code: item.code, description: item.description }));
+}
+
+export interface EnrollmentInfo {
+  enrollment: number;
+  maximumEnrollment: number;
+  seatsAvailable: number;
+  waitCapacity: number;
+  waitCount: number;
+  waitAvailable: number;
+}
+
+function parseEnrollmentField(text: string, label: string): number {
+  const match = new RegExp(`${label}:\\s*</span>\\s*<span[^>]*>\\s*(-?\\d+)`, "i").exec(text);
+  return match ? Number(match[1]) : 0;
+}
+
+/**
+ * Fetches live seat / waitlist counts for a single section. Banner returns an
+ * HTML fragment (not JSON), so the numbers are parsed out by label. Used by the
+ * seat-refresh path to update counts without a full catalog scrape.
+ */
+export async function getEnrollmentInfo(
+  session: SisSession,
+  term: string,
+  courseReferenceNumber: string
+): Promise<EnrollmentInfo> {
+  const body = new URLSearchParams({ term, courseReferenceNumber });
+
+  const res = await fetch(sisUrl("/ssb/searchResults/getEnrollmentInfo"), {
+    method: "POST",
+    headers: {
+      ...commonHeaders(sessionCookieString(session), session.tokenB),
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: body.toString(),
+  });
+
+  if (!res.ok) {
+    throw new Error(`getEnrollmentInfo failed: ${res.status} ${res.statusText}`);
+  }
+
+  const html = await res.text();
+  return {
+    enrollment: parseEnrollmentField(html, "Enrollment Actual"),
+    maximumEnrollment: parseEnrollmentField(html, "Enrollment Maximum"),
+    seatsAvailable: parseEnrollmentField(html, "Enrollment Seats Available"),
+    waitCapacity: parseEnrollmentField(html, "Waitlist Capacity"),
+    waitCount: parseEnrollmentField(html, "Waitlist Actual"),
+    waitAvailable: parseEnrollmentField(html, "Waitlist Seats Available"),
+  };
+}
+
 export async function searchCourses(
   session: SisSession,
   params: SearchParams

@@ -1,35 +1,23 @@
-import { getTerms, searchCourses } from "@/lib/sis/client";
-import { getOrCreateSession } from "@/lib/sis/session";
-import type { AutocompleteItem, SearchParams, SearchResultsResponse } from "@/lib/sis/types";
-import { cache, cachified } from "@/lib/cache/index";
-import { searchKey, termListKey } from "@/lib/cache/keys";
-
-const TERMS_FALLBACK_TERM = "202510"; // a known recent term used only to bootstrap getTerms
+/**
+ * Application layer for the read path. Searches are served entirely from the
+ * persistent D1 store (see docs/plans/d1-persistence.md); the live Banner API is
+ * only touched by the ingestion / refresh jobs in lib/ingest. There is no
+ * request-time cache or session pool anymore — D1 is the source of truth.
+ */
+import { getDb } from "@/lib/db/client";
+import { getTerms, searchSections } from "@/lib/db/queries";
+import type {
+  AutocompleteItem,
+  SearchParams,
+  SearchResultsResponse,
+} from "@/lib/sis/types";
 
 export async function fetchTerms(): Promise<AutocompleteItem[]> {
-  return cachified({
-    cache,
-    key: termListKey(),
-    ttl: 4 * 60 * 60 * 1000, // 4 hours
-    staleWhileRevalidate: 60 * 60 * 1000, // 1 hour extra stale window
-    async getFreshValue() {
-      const session = await getOrCreateSession(TERMS_FALLBACK_TERM);
-      return getTerms(session);
-    },
-  });
+  return getTerms(getDb());
 }
 
 export async function fetchSearchResults(
   params: SearchParams
 ): Promise<SearchResultsResponse> {
-  return cachified({
-    cache,
-    key: searchKey(params),
-    ttl: 5 * 60 * 1000, // 5 minutes
-    staleWhileRevalidate: 60 * 1000, // 1 minute extra stale window
-    async getFreshValue() {
-      const session = await getOrCreateSession(params.term);
-      return searchCourses(session, params);
-    },
-  });
+  return searchSections(getDb(), params);
 }

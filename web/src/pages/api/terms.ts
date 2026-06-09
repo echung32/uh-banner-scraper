@@ -11,8 +11,8 @@ export const GET: APIRoute = async () => {
   } catch (err) {
     console.error("Failed to fetch terms:", err);
     return new Response(
-      JSON.stringify({ error: "Failed to fetch terms from SIS" }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Failed to fetch terms" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 };

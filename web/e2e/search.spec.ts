@@ -1,9 +1,9 @@
 import { test, expect, type Page } from "@playwright/test";
 
-// These tests drive the real Astro SSR app against the mock SIS server wired up
-// in playwright.config.ts. The mock reproduces Banner's stateful search form, so
-// the course-number test below fails if the client stops resetting the form
-// before each search (the original bug).
+// These tests drive the real Astro SSR app against a seeded local D1 (see
+// e2e/global-setup.ts) — searches are served from the database, not the live
+// SIS. The Banner-facing ingestion path (incl. the resetDataForm regression
+// guard) is covered separately in ingest.spec.ts.
 
 /** Reads the "Showing X–Y of N sections" summary into the section count N. */
 async function totalSections(page: Page): Promise<number> {
@@ -48,14 +48,12 @@ test("subject search returns matching sections", async ({ page }) => {
   await expect(page.getByRole("cell", { name: "ICS 111" }).first()).toBeVisible();
 });
 
-test("course number filter changes the table on a reused session", async ({ page }) => {
-  // First search: subject only. Establishes (and pools) the session.
+test("course number filter narrows the results", async ({ page }) => {
+  // First search: subject only.
   await runSearch(page, "ICS", "");
   expect(await totalSections(page)).toBe(6);
 
-  // Second search on the SAME pooled session: add a course-number filter.
-  // This is the regression — without resetDataForm the server replays the prior
-  // criteria and the count stays at 6.
+  // Add a course-number filter — served by the SQL WHERE clause.
   await runSearch(page, "ICS", "111");
   await expect(page.getByText(/of 2 sections/)).toBeVisible();
   expect(await totalSections(page)).toBe(2);

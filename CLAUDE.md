@@ -28,16 +28,23 @@ Key invariants: the synchronizer token is passed as the `x-synchronizer-token` h
 
 Astro `output: "server"` with the Node standalone adapter; React islands for interactivity; Tailwind v4 via the Vite plugin; shadcn/ui components under `src/components/ui/`.
 
-Layering (each layer only calls the one below):
-- **`src/pages/api/*.ts`** — Astro API routes (`search.ts`, `terms.ts`). Parse/validate query params, clamp page sizes, map errors to HTTP status. Thin.
-- **`src/lib/search.ts`** — Application layer. Wraps every fetch in `cachified` (terms cached 4h, search results 5m, both with stale-while-revalidate).
-- **`src/lib/sis/client.ts`** — The SIS HTTP client. `establishSession`, `getTerms`, `resetSearchForm`, `searchCourses`. This is where the handshake lives.
-- **`src/lib/sis/session.ts`** — In-memory session pool keyed by term code, with a 28-min TTL (2-min buffer under the server's 30-min expiry) and in-flight de-duplication so concurrent requests for the same term share one handshake.
-- **`src/lib/cache/index.ts`** — `unstorage` memory-driver store adapting to the `@epic-web/cachified` cache interface.
+The app is split into a **read path** (user-facing, served entirely from a persistent Cloudflare D1 store) and **write paths** (Banner-facing ingestion/refresh jobs that populate D1). The live Banner API is never on the request hot path. Design + rationale: `docs/plans/d1-persistence.md`; the deferred Cloudflare Workers hosting migration: `docs/plans/workers-migration.md`.
 
-Because both the session pool and the cache are **in-process memory**, they reset on every server restart and are not shared across instances — relevant if this is ever deployed to multiple nodes or serverless.
+**Read path** (each layer only calls the one below):
+- **`src/pages/api/{search,terms}.ts`** — thin Astro API routes; parse/validate/clamp params, map errors to HTTP status.
+- **`src/lib/search.ts`** — application layer; calls the DB query layer (no cache, no Banner, no session).
+- **`src/lib/db/queries.ts`** — `getTerms` and `searchSections` (reproduces Banner's filter/sort/paginate semantics in SQL; sort column is whitelisted). Sections are reconstructed byte-faithfully from a stored `raw_json` blob (`src/lib/db/mappers.ts`).
+- **`src/lib/db/client.ts`** — a narrow `D1Like` interface with two backends: `remoteD1` (D1 REST API, for a deployed Node host) and `localSqliteD1` (Node `node:sqlite` over the wrangler local D1 file, for dev/tests). Selected by `D1_MODE`. On Workers the native `env.DB` binding satisfies `D1Like` directly.
 
-The SIS base URL comes from `SIS_BASE_URL` env var (see `web/.env.example`), defaulting to the production UH host.
+**Write path** (Banner-facing; only these touch the live SIS):
+- **`src/lib/sis/client.ts`** — the SIS HTTP client and handshake: `establishSession`, `getTerms`, `getSubjects`, `resetSearchForm`, `searchCourses`, `getEnrollmentInfo`.
+- **`src/lib/ingest/*`** — `sync.ts` (full catalog sync: enumerate subjects, paginate, delete-and-replace per `(term,subject)`), `seatRefresh.ts` (per-CRN seat-only update via `getEnrollmentInfo`), `terms.ts` (term-list refresh + `is_view_only` recompute).
+- **`src/lib/db/upsert.ts`** — all D1 writes + `sync_run` bookkeeping.
+- **`src/pages/api/admin/{sync,refresh-seats}.ts`** — secret-guarded (`x-admin-secret`) triggers; seat refresh enforces a global per-term cooldown. POSTs must send `Content-Type: application/json` to clear Astro's CSRF origin check.
+
+D1 schema lives in `web/migrations/` (`wrangler d1 migrations apply uh_sis [--local|--remote]`). `SIS_BASE_URL`, `D1_MODE`, `CLOUDFLARE_ACCOUNT_ID`, `D1_DATABASE_ID`, `CLOUDFLARE_API_TOKEN`, and `ADMIN_SECRET` come from env (see `web/.env.example`).
+
+> Note: the previous in-memory `cachified`/`unstorage` cache and the in-memory session pool (`src/lib/cache/`, `src/lib/sis/session.ts`) have been removed — D1 is the source of truth and the handshake now runs once per ingestion job, not per request.
 
 ## Commands
 
@@ -52,7 +59,11 @@ yarn test -g "course number filter"          # single test by title
 ```
 Note: the **root** also has a `package.json` with `workspaces: ["web"]` and Yarn PnP (`.pnp.cjs`); run `yarn` from the root (or `web/`) to install. The `yarn astro check` typecheck cannot find its binary under Yarn PnP, so rely on `yarn build` for type errors.
 
-E2E tests live in `web/e2e/`. They run the **full Astro SSR build** (`build` + `preview`) against a local mock SIS server (`web/e2e/mock-sis-server.mjs`) — not the live UH host — with the app pointed at it via `SIS_BASE_URL`; both are launched by Playwright's `webServer` config. The mock deliberately reproduces Banner's stateful-form quirk (it replays stored criteria unless `resetDataForm` was called first), so `search.spec.ts`'s course-number test is a genuine regression guard for the reset described above. Tests use the production build (not `dev`) to keep the Astro dev toolbar out of the DOM.
+E2E tests live in `web/e2e/` and run the **full Astro SSR build** (`build` + `preview`); Playwright's `webServer` launches both the app and the mock SIS server (`web/e2e/mock-sis-server.mjs`) — never the live UH host. Two flavors:
+- **Read-path** (`search.spec.ts`, all browsers) — served from a **seeded local D1**. `e2e/global-setup.ts` applies the local migration and inserts a fixture catalog; the app reads it via `D1_MODE=local`. No SIS involved.
+- **Ingestion** (`ingest.spec.ts`, chromium only — it mutates shared D1) — drives the Banner-facing sync/seat-refresh through the admin routes against the mock SIS, writing to the same local D1. The mock reproduces Banner's stateful-form quirk, and the sync reuses one session across two subjects, so the test is the genuine regression guard for the `resetDataForm` reset.
+
+Tests use the production build (not `dev`) to keep the Astro dev toolbar out of the DOM.
 
 ### Python scripts (uv, run from repo root)
 ```bash

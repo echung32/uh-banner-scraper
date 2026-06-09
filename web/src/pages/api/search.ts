@@ -40,8 +40,8 @@ export const GET: APIRoute = async ({ request }) => {
   } catch (err) {
     console.error("Search failed:", err);
     return new Response(
-      JSON.stringify({ error: "Failed to fetch search results from SIS" }),
-      { status: 502, headers: { "Content-Type": "application/json" } }
+      JSON.stringify({ error: "Failed to fetch search results" }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
 };
