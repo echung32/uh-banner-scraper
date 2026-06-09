@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+.python-version
+
+# Yarn / Node
+.yarn/cache/
+.yarn/install-state.gz
+node_modules/
+
+# Web app build (also covered by web/.gitignore)
+web/dist/
+web/.astro/
+
+# Environment variables
+.env
+.env.local
+.env.*.local

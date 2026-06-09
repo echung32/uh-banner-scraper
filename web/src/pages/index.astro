@@ -1,0 +1,36 @@
+---
+import Layout from "../layouts/Layout.astro";
+import { SearchApp } from "../components/SearchApp";
+import { fetchTerms } from "../lib/search";
+
+let terms: Awaited<ReturnType<typeof fetchTerms>> = [];
+let fetchError: string | null = null;
+
+try {
+  terms = await fetchTerms();
+} catch (err) {
+  fetchError = "Unable to connect to UH SIS. Please try again later.";
+  console.error("Failed to fetch terms on page load:", err);
+}
+---
+
+<Layout title="UH Course Search">
+  <div class="space-y-6">
+    <div>
+      <h1 class="text-2xl font-bold tracking-tight">Course Search</h1>
+      <p class="mt-1 text-sm text-muted-foreground">
+        Search University of Hawaiʻi course sections via Banner SSB9.
+      </p>
+    </div>
+
+    {
+      fetchError ? (
+        <div class="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
+          {fetchError}
+        </div>
+      ) : (
+        <SearchApp terms={terms} client:load />
+      )
+    }
+  </div>
+</Layout>
