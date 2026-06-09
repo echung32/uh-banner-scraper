@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { SearchForm } from "./SearchForm";
 import { ResultsTable } from "./ResultsTable";
+import { ALL_CAMPUSES } from "@/lib/campuses";
 import type { AutocompleteItem, SearchResultsResponse } from "@/lib/sis/types";
 
 interface SearchAppProps {
@@ -11,6 +12,9 @@ interface SearchState {
   term: string;
   subject: string;
   courseNumber: string;
+  campus: string;
+  college: string;
+  department: string;
   openOnly: boolean;
   pageOffset: number;
   pageMaxSize: number;
@@ -34,6 +38,14 @@ export function SearchApp({ terms }: SearchAppProps) {
       openOnly: String(params.openOnly),
     });
     if (params.courseNumber) query.set("courseNumber", params.courseNumber);
+    // ALL_CAMPUSES (or empty) means "don't filter by campus" — omit the param.
+    if (params.campus && params.campus !== ALL_CAMPUSES)
+      query.set("campus", params.campus);
+    // "ALL" means no catalog facet filter — omit.
+    if (params.college && params.college !== "ALL")
+      query.set("college", params.college);
+    if (params.department && params.department !== "ALL")
+      query.set("department", params.department);
 
     try {
       const res = await fetch(`/api/search?${query.toString()}`);
@@ -55,6 +67,9 @@ export function SearchApp({ terms }: SearchAppProps) {
     term: string;
     subject: string;
     courseNumber: string;
+    campus: string;
+    college: string;
+    department: string;
     openOnly: boolean;
   }) {
     const state: SearchState = { ...params, pageOffset: 0, pageMaxSize: 10 };

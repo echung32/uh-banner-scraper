@@ -53,6 +53,9 @@ function SectionRow({ section }: { section: CourseSection }) {
     <TableRow>
       <TableCell className="font-mono text-xs">{section.subject}</TableCell>
       <TableCell className="font-mono font-medium">{section.subjectCourse}</TableCell>
+      <TableCell className="text-sm text-muted-foreground">
+        {section.campusDescription ?? "—"}
+      </TableCell>
       <TableCell className="text-center">{section.sequenceNumber}</TableCell>
       <TableCell className="max-w-[200px]">
         <span className="line-clamp-2 text-sm">{section.courseTitle}</span>
@@ -96,7 +99,7 @@ function SkeletonRows() {
     <>
       {Array.from({ length: 5 }).map((_, i) => (
         <TableRow key={i}>
-          {Array.from({ length: 10 }).map((__, j) => (
+          {Array.from({ length: 11 }).map((__, j) => (
             <TableCell key={j}>
               <Skeleton className="h-4 w-full" />
             </TableCell>
@@ -159,6 +162,7 @@ export function ResultsTable({ results, isLoading, onPageChange }: ResultsTableP
             <TableRow>
               <TableHead className="w-16">Subj</TableHead>
               <TableHead className="w-24">Course</TableHead>
+              <TableHead>Campus</TableHead>
               <TableHead className="w-16 text-center">Sec</TableHead>
               <TableHead>Title</TableHead>
               <TableHead className="w-16 text-center">Cr</TableHead>
@@ -174,7 +178,7 @@ export function ResultsTable({ results, isLoading, onPageChange }: ResultsTableP
               <SkeletonRows />
             ) : results?.data.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={10} className="h-24 text-center text-muted-foreground">
+                <TableCell colSpan={11} className="h-24 text-center text-muted-foreground">
                   No course sections match your search.
                 </TableCell>
               </TableRow>

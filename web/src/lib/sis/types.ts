@@ -104,6 +104,12 @@ export interface SearchParams {
   term: string;
   subject: string;
   courseNumber?: string;
+  /** UH campus code (e.g. "MAN"); undefined means all campuses. */
+  campus?: string;
+  /** Academic college code (from the course catalog); undefined = all. */
+  college?: string;
+  /** Department code (from the course catalog); undefined = all. */
+  department?: string;
   openOnly?: boolean;
   pageOffset: number;
   pageMaxSize: number;

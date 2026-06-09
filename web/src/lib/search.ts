@@ -5,7 +5,19 @@
  * request-time cache or session pool anymore — D1 is the source of truth.
  */
 import { getDb } from "@/lib/db/client";
-import { getTerms, searchSections } from "@/lib/db/queries";
+import {
+  getCatalogFacet,
+  getCourseCatalog,
+  getFilterOptions,
+  getInstructor,
+  getSectionDetail,
+  getTerms,
+  searchSections,
+  type CourseCatalog,
+  type FilterKind,
+  type Instructor,
+  type SectionDetail,
+} from "@/lib/db/queries";
 import type {
   AutocompleteItem,
   SearchParams,
@@ -20,4 +32,37 @@ export async function fetchSearchResults(
   params: SearchParams
 ): Promise<SearchResultsResponse> {
   return searchSections(getDb(), params);
+}
+
+export async function fetchFilterOptions(
+  term: string,
+  kind: FilterKind,
+  campusDescription?: string
+): Promise<AutocompleteItem[]> {
+  // College/Department aren't in filter_option (UH's get_college/get_department
+  // return empty); derive them from the ingested course catalog, campus-scoped.
+  if (kind === "college" || kind === "department") {
+    return getCatalogFacet(getDb(), term, kind, campusDescription);
+  }
+  return getFilterOptions(getDb(), term, kind);
+}
+
+export async function fetchCourseCatalog(
+  term: string,
+  campusDescription: string,
+  subject: string,
+  courseNumber: string
+): Promise<CourseCatalog | null> {
+  return getCourseCatalog(getDb(), term, campusDescription, subject, courseNumber);
+}
+
+export async function fetchSectionDetail(
+  term: string,
+  crn: string
+): Promise<SectionDetail | null> {
+  return getSectionDetail(getDb(), term, crn);
+}
+
+export async function fetchInstructor(bannerId: string): Promise<Instructor | null> {
+  return getInstructor(getDb(), bannerId);
 }
