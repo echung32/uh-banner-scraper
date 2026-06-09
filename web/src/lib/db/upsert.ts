@@ -249,13 +249,13 @@ export async function upsertCourse(
          grading_modes = excluded.grading_modes,
          schedule_types = excluded.schedule_types,
          credit_breakdown = excluded.credit_breakdown,
-         description = excluded.description,
-         prerequisites = excluded.prerequisites,
-         corequisites = excluded.corequisites,
+         description = COALESCE(excluded.description, course.description),
+         prerequisites = COALESCE(excluded.prerequisites, course.prerequisites),
+         corequisites = COALESCE(excluded.corequisites, course.corequisites),
          raw_catalog_html = excluded.raw_catalog_html,
-         raw_description_html = excluded.raw_description_html,
-         raw_prereq_html = excluded.raw_prereq_html,
-         raw_coreq_html = excluded.raw_coreq_html,
+         raw_description_html = COALESCE(excluded.raw_description_html, course.raw_description_html),
+         raw_prereq_html = COALESCE(excluded.raw_prereq_html, course.raw_prereq_html),
+         raw_coreq_html = COALESCE(excluded.raw_coreq_html, course.raw_coreq_html),
          synced_at = excluded.synced_at`
     )
     .bind(

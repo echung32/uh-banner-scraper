@@ -99,6 +99,14 @@ export interface DetailsOptions {
   sections?: boolean;
   /** Run the per-instructor contact-card pass (default true). */
   instructors?: boolean;
+  /**
+   * In the catalog pass, also fetch course description / prerequisites /
+   * corequisites (default true). These are 3 of the 4 per-course fetches, so
+   * `text:false` runs a ~4× lighter "college/department only" pass (enough for
+   * the College/Department filters); the text is preserved if already present
+   * (upsertCourse COALESCEs it) and can be filled later.
+   */
+  text?: boolean;
   /** Delay between per-course / per-CRN / per-instructor fetches (ms). */
   courseDelayMs?: number;
   log?: (msg: string) => void;
@@ -148,6 +156,7 @@ async function syncCourseCatalog(
   session: SisSession,
   term: string,
   delayMs: number,
+  withText: boolean,
   log: (m: string) => void
 ): Promise<{ courses: number; status: "ok" | "partial"; session: SisSession }> {
   // One representative CRN per (campus, subject, course_number). Catalog facts
@@ -169,17 +178,20 @@ async function syncCourseCatalog(
   let done = 0;
   let since = 0;
   let status: "ok" | "partial" = "ok";
+  // With text it's 4 fetches/course, without it's 1 — budget the per-session
+  // request count accordingly so a slim pass doesn't re-handshake too often.
+  const perSession = withText ? CATALOG_PER_SESSION : CATALOG_PER_SESSION * 4;
   for (const c of courses) {
-    const rotated = await rotateIfNeeded(session, term, since, CATALOG_PER_SESSION);
+    const rotated = await rotateIfNeeded(session, term, since, perSession);
     if (rotated !== session) { session = rotated; since = 0; }
     since += 1;
     try {
-      // Catalog + the three text fragments, all per (campus, course).
+      // Catalog always; the three text fragments only when withText.
       const [catalogHtml, descHtml, prereqHtml, coreqHtml] = await Promise.all([
         getCatalogDetails(session, term, c.crn),
-        getCourseDescription(session, term, c.crn),
-        getPrerequisites(session, term, c.crn),
-        getCorequisites(session, term, c.crn),
+        withText ? getCourseDescription(session, term, c.crn) : Promise.resolve(null),
+        withText ? getPrerequisites(session, term, c.crn) : Promise.resolve(null),
+        withText ? getCorequisites(session, term, c.crn) : Promise.resolve(null),
       ]);
       await upsertCourse(
         db,
@@ -190,9 +202,10 @@ async function syncCourseCatalog(
         {
           catalog: parseCatalogDetails(catalogHtml),
           rawCatalogHtml: catalogHtml,
-          description: parseCourseDescription(descHtml),
-          prerequisites: parsePrerequisites(prereqHtml),
-          corequisites: parseCorequisites(coreqHtml),
+          // null leaves existing text untouched (upsertCourse COALESCEs).
+          description: descHtml === null ? null : parseCourseDescription(descHtml),
+          prerequisites: prereqHtml === null ? null : parsePrerequisites(prereqHtml),
+          corequisites: coreqHtml === null ? null : parseCorequisites(coreqHtml),
           rawDescriptionHtml: descHtml,
           rawPrereqHtml: prereqHtml,
           rawCoreqHtml: coreqHtml,
@@ -323,6 +336,7 @@ export async function syncDetails(
   const doCatalog = options.catalog ?? true;
   const doSections = options.sections ?? true;
   const doInstructors = options.instructors ?? true;
+  const withText = options.text ?? true;
   const delay = options.courseDelayMs ?? DEFAULT_COURSE_DELAY_MS;
 
   const startedAt = Date.now();
@@ -344,7 +358,7 @@ export async function syncDetails(
       if (f.status === "partial") status = "partial";
     }
     if (doCatalog) {
-      const c = await syncCourseCatalog(db, session, term, delay, log);
+      const c = await syncCourseCatalog(db, session, term, delay, withText, log);
       courses = c.courses;
       session = c.session;
       if (c.status === "partial") status = "partial";
