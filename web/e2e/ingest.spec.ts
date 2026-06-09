@@ -42,6 +42,85 @@ test("admin sync ingests the mock catalog into D1", async ({ request }) => {
   ).toBe(2);
 });
 
+test("details sync persists filter options and course catalog", async ({ request }) => {
+  const res = await request.post(`/api/admin/sync-details?term=${TERM}&delayMs=0`, {
+    headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
+  });
+  expect(res.ok()).toBeTruthy();
+  const body = await res.json();
+  expect(body.ok).toBe(true);
+  // 10 filter kinds attempted; ICS + MATH courses (5 distinct) catalogued.
+  expect(body.courses).toBeGreaterThanOrEqual(5);
+
+  // Filter-option menus are now server-driven from filter_option.
+  const college = await request.get("/api/filters", {
+    params: { term: TERM, kind: "college" },
+  });
+  expect(college.ok()).toBeTruthy();
+  const colleges = (await college.json()).options as Array<{ code: string; description: string }>;
+  expect(colleges).toContainEqual({ code: "14", description: "College of Natural Sciences" });
+
+  // An unknown kind is rejected.
+  const badKind = await request.get("/api/filters", { params: { term: TERM, kind: "bogus" } });
+  expect(badKind.status()).toBe(400);
+
+  // Course catalog: academic college/department parsed from getSectionCatalogDetails,
+  // keyed by campus (mock sections are at "Manoa").
+  const ics = await request.get("/api/course", {
+    params: { term: TERM, campus: "Manoa", subject: "ICS", courseNumber: "111" },
+  });
+  expect(ics.ok()).toBeTruthy();
+  const icsCatalog = await ics.json();
+  expect(icsCatalog.campusDescription).toBe("Manoa");
+  expect(icsCatalog.collegeName).toBe("College of Natural Sciences");
+  expect(icsCatalog.collegeCode).toBe("14");
+  expect(icsCatalog.department).toBe("Information& Computer Sciences");
+  expect(icsCatalog.departmentCode).toBe("ICS");
+  expect(icsCatalog.gradingModes).toContain("Audit  A");
+  // Slice 2: course-level text. ICS 111 has a description, no prereqs/coreqs.
+  expect(icsCatalog.description).toContain("introductory course");
+  expect(icsCatalog.prerequisites).toBeNull();
+  expect(icsCatalog.corequisites).toBeNull();
+
+  // ICS 311 carries parsed prerequisites (the populated branch).
+  const ics311 = await request.get("/api/course", {
+    params: { term: TERM, campus: "Manoa", subject: "ICS", courseNumber: "311" },
+  });
+  expect((await ics311.json()).prerequisites).toContain("Prerequisites:ICS 211");
+
+  // Slice 3: section-level detail. All 9 CRNs catalogued; CRN 10001 is cross-listed.
+  expect(body.sectionDetails).toBe(9);
+  const sect = await request.get("/api/section", { params: { term: TERM, crn: "10001" } });
+  expect(sect.ok()).toBeTruthy();
+  const detail = await sect.json();
+  expect(detail.crossListCrns).toEqual(["10002"]);
+  expect(detail.fees[0].amount).toBe("$50.00");
+  expect(detail.restrictions[0].category).toBe("Campuses");
+  expect(detail.linkedCrns).toBeNull();
+  expect(detail.syllabus).toBeNull();
+
+  // Slice 4: instructor contact card (CRN 10005 has faculty banner_id 9001).
+  expect(body.instructors).toBe(1);
+  const instr = await request.get("/api/instructor", { params: { bannerId: "9001" } });
+  expect(instr.ok()).toBeTruthy();
+  const card = await instr.json();
+  expect(card.title).toBe("Associate Professor");
+  expect(card.department).toBe("Information & Computer Sciences");
+  expect(card.college).toBe("MAN-College of Natural Sciences");
+
+  // Wrong campus for an existing course is a 404 (campus is part of the key).
+  const wrongCampus = await request.get("/api/course", {
+    params: { term: TERM, campus: "University of Hawaii at Hilo", subject: "ICS", courseNumber: "111" },
+  });
+  expect(wrongCampus.status()).toBe(404);
+
+  // A course we never ingested is a 404.
+  const missing = await request.get("/api/course", {
+    params: { term: TERM, campus: "Manoa", subject: "ICS", courseNumber: "999" },
+  });
+  expect(missing.status()).toBe(404);
+});
+
 test("admin sync rejects requests without the secret", async ({ request }) => {
   const res = await request.post(`/api/admin/sync?term=${TERM}`, {
     headers: { "content-type": "application/json" },
