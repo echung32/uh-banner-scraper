@@ -1,5 +1,5 @@
 {
-  "name": "uh-banner-scraper",
+  "name": "uh-course-search",
   "private": true,
   "workspaces": [
     "web"
