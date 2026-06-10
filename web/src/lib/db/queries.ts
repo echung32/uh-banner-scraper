@@ -28,12 +28,31 @@ const SORT_COLUMNS: Record<string, string> = {
   campusDescription: "campus_description",
 };
 
+/**
+ * The catalog course number as displayed (e.g. "111", "110D"), derived by
+ * stripping the subject prefix off `subject_course` ("ICS111" → "111"). Banner
+ * stores `course_number` in an internal padded form ("1110") that the UI never
+ * shows and that its own course-number search does NOT match against; the search
+ * box and the table both speak the catalog number, so filtering and ordering use
+ * this. `subject_course` is always `subject` + the catalog number (Banner emits
+ * no separator — "ICS111"), so stripping the leading `subject` is exact; the
+ * trim() only guards against a stray separator (e.g. test fixtures use "ICS 111").
+ */
+const CATALOG_NUMBER_SQL = "trim(substr(cs.subject_course, length(cs.subject) + 1))";
+
 function resolveSort(column: string | undefined, direction: string | undefined): string {
   const col = SORT_COLUMNS[column ?? "subjectDescription"] ?? "subject_description";
   const dir = (direction ?? "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
   // Columns are qualified `cs.` because searchSections joins the course table.
-  // Tiebreak on (term, crn) for stable pagination.
-  return `cs.${col} ${dir}, cs.term ASC, cs.crn ASC`;
+  // Tiebreak by catalog course number, then sequence, then (term, crn): within a
+  // subject (where subject_description is constant) this yields ascending course
+  // order instead of the effectively-random CRN order. CATALOG_NUMBER_SQL is the
+  // displayed catalog number (e.g. "111"), not Banner's internal padded
+  // course_number (e.g. "1110") — see buildSectionFilter.
+  return (
+    `cs.${col} ${dir}, ${CATALOG_NUMBER_SQL} ASC,`
+    + " cs.sequence_number ASC, cs.term ASC, cs.crn ASC"
+  );
 }
 
 export interface TermSyncMeta {
@@ -362,7 +381,7 @@ function buildSectionFilter(params: SearchParams): {
 
   const where = "cs.term = ?"
     + " AND (? IS NULL OR cs.subject = ?)"
-    + " AND (? IS NULL OR cs.course_number = ?)"
+    + ` AND (? IS NULL OR ${CATALOG_NUMBER_SQL} = ?)`
     + " AND (? IS NULL OR cs.campus_description = ?)"
     + " AND (? IS NULL OR c.college_code = ?)"
     + " AND (? IS NULL OR c.department_code = ?)"
