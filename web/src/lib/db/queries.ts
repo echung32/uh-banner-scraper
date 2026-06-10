@@ -4,6 +4,8 @@
  */
 import type {
   AutocompleteItem,
+  CoverageDetail,
+  SearchCoverage,
   SearchParams,
   SearchResultsResponse,
 } from "@/lib/sis/types";
@@ -37,25 +39,38 @@ function resolveSort(column: string | undefined, direction: string | undefined):
 export interface TermSyncMeta {
   /** Epoch-ms of the last full backfill, or null if never backfilled (dynamic). */
   lastSyncedAt: number | null;
+  /** Epoch-ms of the last seat-only refresh, or null if never refreshed. */
+  lastSeatRefreshAt: number | null;
   /** Past terms (description ends "(View Only)") are immutable. */
   isViewOnly: boolean;
 }
 
 /**
  * Sync state for one term, or null if unknown. Drives the search route's branch
- * (backfilled → SQL path; dynamic → page cache) and the page cache's staleness
- * rule (view-only windows never expire).
+ * (backfilled → SQL path; dynamic → page cache), the page cache's staleness rule
+ * (view-only windows never expire), and the backfill freshness view's term-level
+ * anchors (last full sync vs last seat refresh).
  */
 export async function getTermSyncMeta(
   db: D1Like,
   term: string
 ): Promise<TermSyncMeta | null> {
   const row = await db
-    .prepare("SELECT last_synced_at, is_view_only FROM term WHERE code = ?")
+    .prepare(
+      "SELECT last_synced_at, last_seat_refresh_at, is_view_only FROM term WHERE code = ?"
+    )
     .bind(term)
-    .first<{ last_synced_at: number | null; is_view_only: number }>();
+    .first<{
+      last_synced_at: number | null;
+      last_seat_refresh_at: number | null;
+      is_view_only: number;
+    }>();
   if (!row) return null;
-  return { lastSyncedAt: row.last_synced_at, isViewOnly: row.is_view_only === 1 };
+  return {
+    lastSyncedAt: row.last_synced_at,
+    lastSeatRefreshAt: row.last_seat_refresh_at,
+    isViewOnly: row.is_view_only === 1,
+  };
 }
 
 /** Serves the term dropdown from D1, preserving Banner's verbatim descriptions. */
@@ -325,14 +340,21 @@ export async function getInstructor(
 }
 
 /** Reproduces Banner's searchResults filter/sort/paginate semantics over D1. */
-export async function searchSections(
-  db: D1Like,
-  params: SearchParams
-): Promise<SearchResultsResponse> {
-  // College/Department live on the `course` table, so the section query LEFT
-  // JOINs it on (term, campus, subject, course_number) — a 1:0..1 join (course
-  // PK is exactly those four cols), so COUNT and pagination are unaffected when
-  // no catalog filter is applied. Columns are `cs.`/`c.` qualified.
+/**
+ * The shared FROM + WHERE + binds for a section search. Extracted so the backfill
+ * freshness view (getBackfillCoverageDetail) reproduces the *exact* filter/sort as
+ * the paginated search, guaranteeing window N lines up with search page N.
+ *
+ * College/Department live on the `course` table, so we LEFT JOIN it on
+ * (term, campus, subject, course_number) — a 1:0..1 join (course PK is exactly
+ * those four cols), so COUNT and pagination are unaffected when no catalog filter
+ * is applied. Columns are `cs.`/`c.` qualified.
+ */
+function buildSectionFilter(params: SearchParams): {
+  from: string;
+  where: string;
+  binds: (string | number | null)[];
+} {
   const from =
     "course_section cs LEFT JOIN course c"
     + " ON c.term = cs.term AND c.campus_description = cs.campus_description"
@@ -357,7 +379,7 @@ export async function searchSections(
   const college = params.college ?? null;
   const department = params.department ?? null;
   const openOnly = params.openOnly ? 1 : 0;
-  const filterBinds = [
+  const binds = [
     params.term,
     subject,
     subject,
@@ -371,6 +393,14 @@ export async function searchSections(
     department,
     openOnly,
   ];
+  return { from, where, binds };
+}
+
+export async function searchSections(
+  db: D1Like,
+  params: SearchParams
+): Promise<SearchResultsResponse> {
+  const { from, where, binds: filterBinds } = buildSectionFilter(params);
 
   const count = await db
     .prepare(`SELECT COUNT(*) AS n FROM ${from} WHERE ${where}`)
@@ -523,5 +553,156 @@ export async function getSearchPageFromChunks(
     pageMaxSize: params.pageMaxSize,
     sectionsFetchedCount: data.length,
     pathMode: "search",
+  };
+}
+
+/**
+ * Coverage summary for a dynamic term's search (current sort + filters): how many
+ * sections / windows are cached out of the full result set. `totalCount` is
+ * supplied by the caller (the just-served page already knows Banner's total) so
+ * this is a single aggregate over the term's `search_chunk` rows.
+ */
+export async function getCoverageSummary(
+  db: D1Like,
+  params: SearchParams,
+  totalCount: number
+): Promise<SearchCoverage> {
+  const { sortColumn, sortDirection } = normalizeChunkSort(params);
+  const sig = filterSignature(params);
+  const row = await db
+    .prepare(
+      `SELECT COUNT(*) AS chunks, COALESCE(SUM(json_array_length(crns_json)), 0) AS cached
+         FROM search_chunk
+        WHERE term = ? AND filter_sig = ? AND sort_column = ? AND sort_direction = ?`
+    )
+    .bind(params.term, sig, sortColumn, sortDirection)
+    .first<{ chunks: number; cached: number }>();
+  return {
+    mode: "page-cache",
+    dynamic: true,
+    chunkSize: CHUNK_SIZE,
+    totalChunks: Math.ceil(totalCount / CHUNK_SIZE),
+    cachedChunks: row?.chunks ?? 0,
+    cachedCount: row?.cached ?? 0,
+  };
+}
+
+/**
+ * Per-window coverage for one search's sort + filters, for the coverage grid.
+ * Returns only the cached windows (absent indices are uncached); `totalChunks`
+ * bounds the grid. `totalCount` comes from any cached window's stored Banner total
+ * (0 — empty grid — when nothing is cached yet).
+ */
+export async function getCoverageDetail(
+  db: D1Like,
+  params: SearchParams
+): Promise<CoverageDetail> {
+  const { sortColumn, sortDirection } = normalizeChunkSort(params);
+  const sig = filterSignature(params);
+  const { results } = await db
+    .prepare(
+      `SELECT chunk_index, json_array_length(crns_json) AS count, total_count, fetched_at
+         FROM search_chunk
+        WHERE term = ? AND filter_sig = ? AND sort_column = ? AND sort_direction = ?
+        ORDER BY chunk_index ASC`
+    )
+    .bind(params.term, sig, sortColumn, sortDirection)
+    .all<{ chunk_index: number; count: number; total_count: number; fetched_at: number }>();
+  const totalCount = results[0]?.total_count ?? 0;
+  return {
+    mode: "page-cache",
+    dynamic: true,
+    chunkSize: CHUNK_SIZE,
+    totalCount,
+    totalChunks: Math.ceil(totalCount / CHUNK_SIZE),
+    chunks: results.map((r) => ({
+      index: r.chunk_index,
+      count: r.count,
+      fetchedAt: r.fetched_at,
+    })),
+  };
+}
+
+/**
+ * Coverage summary for a fully-backfilled term — cheap, runs on every search.
+ * Everything is in `course_section`, so all windows are present; this just bounds
+ * the grid (no row scan). The per-window freshness comes later, on dialog open
+ * (getBackfillCoverageDetail). `totalCount` is the count the search already computed.
+ */
+export function getBackfillCoverageSummary(
+  params: SearchParams,
+  totalCount: number,
+  meta: TermSyncMeta
+): SearchCoverage {
+  const totalChunks = Math.ceil(totalCount / CHUNK_SIZE);
+  return {
+    mode: "backfill",
+    dynamic: false,
+    chunkSize: CHUNK_SIZE,
+    totalChunks,
+    cachedChunks: totalChunks,
+    cachedCount: totalCount,
+    isViewOnly: meta.isViewOnly,
+  };
+}
+
+/**
+ * Per-window data-freshness for a backfilled term, for the coverage grid. Derived
+ * on the fly (no stored chunks): number each filtered/sorted row with the same
+ * ORDER BY as the paginated search (resolveSort), bucket into CHUNK_SIZE windows,
+ * and aggregate `synced_at` per window. MIN(synced_at) is the worst-case staleness
+ * the grid colors on; MAX shows the freshest write in the slice. Runs only on
+ * dialog open. CHUNK_SIZE is a trusted constant, safe to interpolate.
+ */
+export async function getBackfillCoverageDetail(
+  db: D1Like,
+  params: SearchParams,
+  meta: TermSyncMeta
+): Promise<CoverageDetail> {
+  const { from, where, binds } = buildSectionFilter(params);
+  const order = resolveSort(params.sortColumn, params.sortDirection);
+  const { results } = await db
+    .prepare(
+      `SELECT (rn - 1) / ${CHUNK_SIZE} AS chunk_index, COUNT(*) AS count,
+              MIN(synced_at) AS oldest, MAX(synced_at) AS newest
+         FROM (
+           SELECT cs.synced_at AS synced_at,
+                  ROW_NUMBER() OVER (ORDER BY ${order}) AS rn
+             FROM ${from} WHERE ${where}
+         )
+        GROUP BY (rn - 1) / ${CHUNK_SIZE}
+        ORDER BY chunk_index ASC`
+    )
+    .bind(...binds)
+    .all<{ chunk_index: number; count: number; oldest: number; newest: number }>();
+
+  const totalCount = results.reduce((n, r) => n + r.count, 0);
+  return {
+    mode: "backfill",
+    dynamic: false,
+    chunkSize: CHUNK_SIZE,
+    totalCount,
+    totalChunks: Math.ceil(totalCount / CHUNK_SIZE),
+    chunks: results.map((r) => ({
+      index: r.chunk_index,
+      count: r.count,
+      oldestSyncedAt: r.oldest,
+      newestSyncedAt: r.newest,
+    })),
+    isViewOnly: meta.isViewOnly,
+    lastSyncedAt: meta.lastSyncedAt,
+    lastSeatRefreshAt: meta.lastSeatRefreshAt,
+  };
+}
+
+/** The (column, direction) a chunk row is keyed by — matches the fill side. */
+function normalizeChunkSort(params: SearchParams): {
+  sortColumn: string;
+  sortDirection: "asc" | "desc";
+} {
+  return {
+    sortColumn: params.sortColumn ?? "subjectDescription",
+    sortDirection:
+      (params.sortDirection ?? "asc").toLowerCase() === "desc" ? "desc" : "asc",
   };
 }

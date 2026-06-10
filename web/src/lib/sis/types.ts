@@ -90,6 +90,32 @@ export interface CourseSection {
   sectionAttributes: Array<{ code: string; description: string }>;
 }
 
+/**
+ * Cache-coverage summary for one search (current sort + filters). Two flavors,
+ * keyed by `mode`:
+ *  - `"page-cache"` (dynamic terms): windows fill on demand; `cachedCount` grows
+ *    as users page through. `dynamic` is true.
+ *  - `"backfill"` (fully-synced terms): every window is present, so
+ *    `cachedChunks === totalChunks` and `cachedCount === totalCount`; the grid is
+ *    a data-freshness *view* (per-window `synced_at` age), not cached-vs-not.
+ * Windows are fixed `chunkSize`-section slices; see `search_chunk` /
+ * lib/ingest/pageCache (page-cache) and queries.getBackfillCoverage* (backfill).
+ */
+export interface SearchCoverage {
+  mode: "page-cache" | "backfill";
+  /** Convenience alias for `mode === "page-cache"` (kept for back-compat). */
+  dynamic: boolean;
+  chunkSize: number;
+  /** Windows that would cover the whole result set (ceil(totalCount / chunkSize)). */
+  totalChunks: number;
+  /** Windows currently cached for this sig+sort (== totalChunks for backfill). */
+  cachedChunks: number;
+  /** Sections cached for this sig+sort (== totalCount for backfill). */
+  cachedCount: number;
+  /** Past terms are immutable snapshots — drives the dialog wording. */
+  isViewOnly?: boolean;
+}
+
 export interface SearchResultsResponse {
   success: boolean;
   totalCount: number;
@@ -98,6 +124,41 @@ export interface SearchResultsResponse {
   pageMaxSize: number;
   sectionsFetchedCount: number;
   pathMode: string | null;
+  /** Present for page-cached (dynamic) and fully-backfilled terms alike. */
+  coverage?: SearchCoverage;
+}
+
+/** One window, for the coverage grid (`/api/coverage`). */
+export interface CoverageChunk {
+  /** Offset-aligned window index; covers sections [index*chunkSize, +chunkSize). */
+  index: number;
+  /** Sections in this window (chunkSize, or fewer for the last window). */
+  count: number;
+  /** Page-cache mode: epoch ms the window was last fetched from Banner. */
+  fetchedAt?: number;
+  /** Backfill mode: oldest `synced_at` in the window (worst-case staleness). */
+  oldestSyncedAt?: number;
+  /** Backfill mode: newest `synced_at` in the window. */
+  newestSyncedAt?: number;
+}
+
+/** Full per-window coverage for one search's sort + filters (`/api/coverage`). */
+export interface CoverageDetail {
+  mode: "page-cache" | "backfill";
+  dynamic: boolean;
+  chunkSize: number;
+  totalCount: number;
+  totalChunks: number;
+  /**
+   * Page-cache: only the cached windows (absent indices are uncached).
+   * Backfill: every window (all present), carrying per-window `synced_at` age.
+   */
+  chunks: CoverageChunk[];
+  /** Past terms are immutable snapshots — drives the dialog wording. */
+  isViewOnly?: boolean;
+  /** Backfill mode: term-level anchors so the two staleness axes are explicit. */
+  lastSyncedAt?: number | null;
+  lastSeatRefreshAt?: number | null;
 }
 
 export interface SearchParams {

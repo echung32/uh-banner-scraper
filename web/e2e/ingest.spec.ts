@@ -42,6 +42,39 @@ test("admin sync ingests the mock catalog into D1", async ({ request }) => {
   ).toBe(2);
 });
 
+test("backfilled term exposes a data-freshness summary and per-window grid", async ({ request }) => {
+  // 202730 is fully backfilled (above), so coverage reports data freshness
+  // (mode "backfill", everything present) rather than cached-vs-not. The grid is
+  // derived on the fly from course_section.synced_at — no search_chunk rows.
+  const search = await request.get("/api/search", {
+    params: { term: TERM, subject: "ICS", pageMaxSize: "50" },
+  });
+  const cov = (await search.json()).coverage;
+  expect(cov).toMatchObject({
+    mode: "backfill",
+    dynamic: false,
+    chunkSize: 50,
+    totalChunks: 1,
+    cachedChunks: 1,
+    cachedCount: 6,
+  });
+
+  const detail = await request.get("/api/coverage", { params: { term: TERM, subject: "ICS" } });
+  expect(detail.ok()).toBeTruthy();
+  const body = await detail.json();
+  expect(body).toMatchObject({ mode: "backfill", dynamic: false, totalCount: 6, totalChunks: 1 });
+  expect(body.chunks).toHaveLength(1);
+  expect(body.chunks[0]).toMatchObject({ index: 0, count: 6 });
+  expect(body.chunks[0].oldestSyncedAt).toBeGreaterThan(0);
+  expect(body.chunks[0].newestSyncedAt).toBeGreaterThanOrEqual(body.chunks[0].oldestSyncedAt);
+  expect(typeof body.lastSyncedAt).toBe("number");
+
+  // Window counts reconstruct the full result set (all-subjects = 9 sections).
+  const all = await request.get("/api/coverage", { params: { term: TERM } });
+  const allBody = await all.json();
+  expect(allBody.chunks.reduce((n: number, c: { count: number }) => n + c.count, 0)).toBe(9);
+});
+
 test("details sync persists filter options and course catalog", async ({ request }) => {
   const res = await request.post(`/api/admin/sync-details?term=${TERM}&delayMs=0`, {
     headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
@@ -137,6 +170,21 @@ test("page cache serves a dynamic term from Banner, then from D1", async ({ requ
   // the sections are now durably in D1 and individually searchable.
   expect(await searchCount(request, { term: DYN, pageMaxSize: "50" })).toBe(9);
   expect(await searchCount(request, { term: DYN, subject: "MATH", pageMaxSize: "50" })).toBe(3);
+
+  // The search response carries a cache-coverage summary for a dynamic term, and
+  // /api/coverage reports the windows now cached for that sort + filters. With 9
+  // all-subjects sections in one 50-section window, the term is fully covered.
+  const search = await request.get("/api/search", { params: { term: DYN, pageMaxSize: "50" } });
+  const cov = (await search.json()).coverage;
+  expect(cov).toMatchObject({ dynamic: true, chunkSize: 50, totalChunks: 1, cachedChunks: 1, cachedCount: 9 });
+
+  const detail = await request.get("/api/coverage", { params: { term: DYN } });
+  expect(detail.ok()).toBeTruthy();
+  const detailBody = await detail.json();
+  expect(detailBody).toMatchObject({ dynamic: true, totalCount: 9, totalChunks: 1 });
+  expect(detailBody.chunks).toHaveLength(1);
+  expect(detailBody.chunks[0]).toMatchObject({ index: 0, count: 9 });
+  expect(detailBody.chunks[0].fetchedAt).toBeGreaterThan(0);
 });
 
 test("admin sync rejects requests without the secret", async ({ request }) => {
@@ -152,6 +200,12 @@ test("seat refresh updates stored seat counts", async ({ request }) => {
   });
   expect((await before.json()).data[0].seatsAvailable).toBe(10);
 
+  // Capture the window's freshness before the refresh (currently the full-sync time).
+  const covBefore = await (
+    await request.get("/api/coverage", { params: { term: TERM, subject: "ICS" } })
+  ).json();
+  const newestBefore = covBefore.chunks[0].newestSyncedAt as number;
+
   const refresh = await request.post(`/api/admin/refresh-seats?term=${TERM}&subject=ICS`, {
     headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
   });
@@ -163,6 +217,12 @@ test("seat refresh updates stored seat counts", async ({ request }) => {
     params: { term: TERM, subject: "ICS", pageMaxSize: "50" },
   });
   expect((await after.json()).data[0].seatsAvailable).toBe(5);
+
+  // The per-CRN synced_at bump from the seat refresh surfaces in the freshness grid.
+  const covAfter = await (
+    await request.get("/api/coverage", { params: { term: TERM, subject: "ICS" } })
+  ).json();
+  expect(covAfter.chunks[0].newestSyncedAt).toBeGreaterThan(newestBefore);
 
   // A second refresh within the cooldown window is rejected.
   const again = await request.post(`/api/admin/refresh-seats?term=${TERM}&subject=ICS`, {

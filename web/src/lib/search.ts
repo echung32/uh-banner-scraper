@@ -6,8 +6,12 @@
  */
 import { getDb } from "@/lib/db/client";
 import {
+  getBackfillCoverageDetail,
+  getBackfillCoverageSummary,
   getCatalogFacet,
   getCourseCatalog,
+  getCoverageDetail,
+  getCoverageSummary,
   getFilterOptions,
   getInstructor,
   getSectionDetail,
@@ -24,6 +28,8 @@ import {
 } from "@/lib/db/queries";
 import type {
   AutocompleteItem,
+  CoverageDetail,
+  SearchCoverage,
   SearchParams,
   SearchResultsResponse,
 } from "@/lib/sis/types";
@@ -48,6 +54,38 @@ export async function fetchSearchPage(
 /** Sync state for a term (null if unknown) — drives the search route's branch. */
 export async function fetchTermSyncMeta(term: string): Promise<TermSyncMeta | null> {
   return getTermSyncMeta(getDb(), term);
+}
+
+/** Cache-coverage summary for a dynamic-term search (attached to the response). */
+export async function fetchCoverageSummary(
+  params: SearchParams,
+  totalCount: number
+): Promise<SearchCoverage> {
+  return getCoverageSummary(getDb(), params, totalCount);
+}
+
+/** Per-window coverage for the coverage grid (`/api/coverage`). */
+export async function fetchCoverageDetail(
+  params: SearchParams
+): Promise<CoverageDetail> {
+  return getCoverageDetail(getDb(), params);
+}
+
+/** Cheap freshness summary for a backfilled-term search (attached to the response). */
+export function fetchBackfillCoverageSummary(
+  params: SearchParams,
+  totalCount: number,
+  meta: TermSyncMeta
+): SearchCoverage {
+  return getBackfillCoverageSummary(params, totalCount, meta);
+}
+
+/** Per-window data-freshness for a backfilled term (`/api/coverage`). */
+export async function fetchBackfillCoverageDetail(
+  params: SearchParams,
+  meta: TermSyncMeta
+): Promise<CoverageDetail> {
+  return getBackfillCoverageDetail(getDb(), params, meta);
 }
 
 export async function fetchFilterOptions(

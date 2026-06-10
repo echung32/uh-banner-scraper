@@ -1,6 +1,12 @@
 import type { APIRoute } from "astro";
 import { getDb } from "@/lib/db/client";
-import { fetchSearchPage, fetchSearchResults } from "@/lib/search";
+import {
+  fetchBackfillCoverageSummary,
+  fetchCoverageSummary,
+  fetchSearchPage,
+  fetchSearchResults,
+  fetchTermSyncMeta,
+} from "@/lib/search";
 import { ensureSearchPage } from "@/lib/ingest/pageCache";
 import { logDb } from "@/lib/log";
 import type { SearchParams } from "@/lib/sis/types";
@@ -47,6 +53,17 @@ export const GET: APIRoute = async ({ request }) => {
     const results = viaPageCache
       ? await fetchSearchPage(params)
       : await fetchSearchResults(params);
+    // Attach a coverage summary: a dynamic term reports partial page-cache
+    // coverage; a backfilled term reports a (cheap) data-freshness summary so the
+    // UI can offer the per-window age grid. Unknown terms get nothing.
+    if (viaPageCache) {
+      results.coverage = await fetchCoverageSummary(params, results.totalCount);
+    } else if (results.totalCount > 0) {
+      const meta = await fetchTermSyncMeta(params.term);
+      if (meta?.lastSyncedAt != null) {
+        results.coverage = fetchBackfillCoverageSummary(params, results.totalCount, meta);
+      }
+    }
     logDb(
       `search ${params.term}/${params.subject || "*"} page ${params.pageOffset}+${params.pageMaxSize}` +
         `${viaPageCache ? " (page-cache)" : ""}` +
