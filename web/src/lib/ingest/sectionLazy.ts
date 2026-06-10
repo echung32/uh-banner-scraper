@@ -29,6 +29,7 @@ import {
 import type { D1Like } from "@/lib/db/client";
 import type { SectionDetail } from "@/lib/db/queries";
 import { upsertSectionDetail } from "@/lib/db/upsert";
+import { logSis } from "@/lib/log";
 
 /** Concurrent first-views of the same section share one live fetch. */
 const inFlight = new Map<string, Promise<SectionDetail | null>>();
@@ -55,6 +56,7 @@ async function fetchAndStore(
   term: string,
   crn: string
 ): Promise<SectionDetail | null> {
+  logSis(`section detail ${term}:${crn} — live fetch (cache miss)`);
   const session = await establishSession(term);
   // Per-fragment tolerance: Banner returns 500 for a CRN it doesn't recognize
   // (e.g. a section that has since been cancelled), and any one fragment may

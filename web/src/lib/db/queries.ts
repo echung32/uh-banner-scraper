@@ -44,8 +44,13 @@ export async function getTerms(db: D1Like): Promise<AutocompleteItem[]> {
   return results.map((r) => ({ code: r.code, description: r.description }));
 }
 
-/** The filter kinds servable from `filter_option` (read-path allowlist). */
+/**
+ * The filter kinds the read path can serve. Most come from `filter_option`;
+ * `subject`, `college`, and `department` are derived from the ingested catalog /
+ * sections instead (see fetchFilterOptions) — UH disables their Banner menus.
+ */
 export const FILTER_KINDS = [
+  "subject",
   "campus",
   "college",
   "department",
@@ -58,6 +63,26 @@ export const FILTER_KINDS = [
   "building",
 ] as const;
 export type FilterKind = (typeof FILTER_KINDS)[number];
+
+/**
+ * Subject menu for a term — derived from the sections actually present
+ * (`course_section`), so it only lists subjects that have data. `code` is the
+ * subject code the search filters on; `description` is Banner's subject name.
+ */
+export async function getSubjectFacet(
+  db: D1Like,
+  term: string
+): Promise<AutocompleteItem[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT subject AS code, MAX(subject_description) AS description
+         FROM course_section WHERE term = ?
+         GROUP BY subject ORDER BY subject ASC`
+    )
+    .bind(term)
+    .all<{ code: string; description: string }>();
+  return results.map((r) => ({ code: r.code, description: r.description }));
+}
 
 /** Serves a server-driven filter dropdown for a term, in Banner's order. */
 export async function getFilterOptions(
@@ -286,13 +311,16 @@ export async function searchSections(
     + " ON c.term = cs.term AND c.campus_description = cs.campus_description"
     + " AND c.subject = cs.subject AND c.course_number = cs.course_number";
 
-  const where = "cs.term = ? AND cs.subject = ?"
+  const where = "cs.term = ?"
+    + " AND (? IS NULL OR cs.subject = ?)"
     + " AND (? IS NULL OR cs.course_number = ?)"
     + " AND (? IS NULL OR cs.campus_description = ?)"
     + " AND (? IS NULL OR c.college_code = ?)"
     + " AND (? IS NULL OR c.department_code = ?)"
     + " AND (? = 0 OR cs.open_section = 1)";
 
+  // Subject is optional on the read path: empty/absent → search all subjects.
+  const subject = params.subject ? params.subject : null;
   const courseNumber = params.courseNumber ?? null;
   // Sections store only the campus description, so map the selected code to it;
   // an unknown/absent code yields NULL → no campus filter (all campuses).
@@ -304,7 +332,8 @@ export async function searchSections(
   const openOnly = params.openOnly ? 1 : 0;
   const filterBinds = [
     params.term,
-    params.subject,
+    subject,
+    subject,
     courseNumber,
     courseNumber,
     campusDescription,

@@ -1,8 +1,21 @@
 import { useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  ChevronsRight,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -14,6 +27,8 @@ import {
 import { SectionDetails } from "./SectionDetails";
 import type { CourseSection, MeetingTime, SearchResultsResponse } from "@/lib/sis/types";
 
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
 // Total columns including the leading expand toggle — kept in sync with the
 // header / skeleton / empty-state colSpans below.
 const COLUMN_COUNT = 12;
@@ -22,6 +37,7 @@ interface ResultsTableProps {
   results: SearchResultsResponse | null;
   isLoading: boolean;
   onPageChange: (pageOffset: number) => void;
+  onPageSizeChange: (pageMaxSize: number) => void;
 }
 
 function formatDays(mt: MeetingTime): string {
@@ -137,49 +153,98 @@ function SkeletonRows() {
   );
 }
 
-export function ResultsTable({ results, isLoading, onPageChange }: ResultsTableProps) {
+export function ResultsTable({
+  results,
+  isLoading,
+  onPageChange,
+  onPageSizeChange,
+}: ResultsTableProps) {
   if (!isLoading && !results) return null;
 
   const totalCount = results?.totalCount ?? 0;
   const pageOffset = results?.pageOffset ?? 0;
-  const pageMaxSize = results?.pageMaxSize ?? 10;
-  const totalPages = Math.ceil(totalCount / pageMaxSize);
+  const pageMaxSize = results?.pageMaxSize ?? 20;
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageMaxSize));
   const currentPage = Math.floor(pageOffset / pageMaxSize) + 1;
+  const lastPageOffset = (totalPages - 1) * pageMaxSize;
 
   return (
     <div className="space-y-4">
       {results && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
+        <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span>
             {totalCount === 0
               ? "No results found"
               : `Showing ${pageOffset + 1}–${Math.min(pageOffset + pageMaxSize, totalCount)} of ${totalCount} sections`}
           </span>
-          {totalPages > 1 && (
+
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
             <div className="flex items-center gap-2">
+              <span className="text-xs">Rows per page</span>
+              <Select
+                value={String(pageMaxSize)}
+                onValueChange={(v) => onPageSizeChange(Number(v))}
+              >
+                <SelectTrigger className="h-8 w-[72px]" aria-label="Rows per page">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {PAGE_SIZE_OPTIONS.map((n) => (
+                    <SelectItem key={n} value={String(n)}>
+                      {n}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <span className="text-xs">
+              Page {currentPage} of {totalPages}
+            </span>
+
+            <div className="flex items-center gap-1">
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="First page"
+                disabled={currentPage <= 1}
+                onClick={() => onPageChange(0)}
+              >
+                <ChevronsLeft className="h-4 w-4" />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Previous page"
                 disabled={currentPage <= 1}
                 onClick={() => onPageChange(pageOffset - pageMaxSize)}
               >
                 <ChevronLeft className="h-4 w-4" />
-                Previous
               </Button>
-              <span className="text-xs">
-                Page {currentPage} of {totalPages}
-              </span>
               <Button
                 variant="outline"
-                size="sm"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Next page"
                 disabled={currentPage >= totalPages}
                 onClick={() => onPageChange(pageOffset + pageMaxSize)}
               >
-                Next
                 <ChevronRight className="h-4 w-4" />
               </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+                aria-label="Last page"
+                disabled={currentPage >= totalPages}
+                onClick={() => onPageChange(lastPageOffset)}
+              >
+                <ChevronsRight className="h-4 w-4" />
+              </Button>
             </div>
-          )}
+          </div>
         </div>
       )}
 

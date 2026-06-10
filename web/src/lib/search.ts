@@ -11,6 +11,7 @@ import {
   getFilterOptions,
   getInstructor,
   getSectionDetail,
+  getSubjectFacet,
   getTerms,
   searchSections,
   type CourseCatalog,
@@ -39,6 +40,10 @@ export async function fetchFilterOptions(
   kind: FilterKind,
   campusDescription?: string
 ): Promise<AutocompleteItem[]> {
+  // Subject is derived from the sections present for the term.
+  if (kind === "subject") {
+    return getSubjectFacet(getDb(), term);
+  }
   // College/Department aren't in filter_option (UH's get_college/get_department
   // return empty); derive them from the ingested course catalog, campus-scoped.
   if (kind === "college" || kind === "department") {

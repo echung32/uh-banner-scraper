@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { SearchForm } from "./SearchForm";
+import { SearchForm, type SearchFormValues } from "./SearchForm";
 import { ResultsTable } from "./ResultsTable";
 import { ALL_CAMPUSES } from "@/lib/campuses";
 import type { AutocompleteItem, SearchResultsResponse } from "@/lib/sis/types";
@@ -20,11 +20,14 @@ interface SearchState {
   pageMaxSize: number;
 }
 
+const DEFAULT_PAGE_SIZE = 20;
+
 export function SearchApp({ terms }: SearchAppProps) {
   const [results, setResults] = useState<SearchResultsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [searchState, setSearchState] = useState<SearchState | null>(null);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   async function runSearch(params: SearchState) {
     setIsLoading(true);
@@ -32,20 +35,18 @@ export function SearchApp({ terms }: SearchAppProps) {
 
     const query = new URLSearchParams({
       term: params.term,
-      subject: params.subject,
       pageOffset: String(params.pageOffset),
       pageMaxSize: String(params.pageMaxSize),
       openOnly: String(params.openOnly),
     });
+    if (params.subject) query.set("subject", params.subject);
     if (params.courseNumber) query.set("courseNumber", params.courseNumber);
     // ALL_CAMPUSES (or empty) means "don't filter by campus" — omit the param.
     if (params.campus && params.campus !== ALL_CAMPUSES)
       query.set("campus", params.campus);
-    // "ALL" means no catalog facet filter — omit.
-    if (params.college && params.college !== "ALL")
-      query.set("college", params.college);
-    if (params.department && params.department !== "ALL")
-      query.set("department", params.department);
+    // Empty college/department means no catalog facet filter — omit.
+    if (params.college) query.set("college", params.college);
+    if (params.department) query.set("department", params.department);
 
     try {
       const res = await fetch(`/api/search?${query.toString()}`);
@@ -63,16 +64,8 @@ export function SearchApp({ terms }: SearchAppProps) {
     }
   }
 
-  function handleSearch(params: {
-    term: string;
-    subject: string;
-    courseNumber: string;
-    campus: string;
-    college: string;
-    department: string;
-    openOnly: boolean;
-  }) {
-    const state: SearchState = { ...params, pageOffset: 0, pageMaxSize: 10 };
+  function handleSearch(params: SearchFormValues) {
+    const state: SearchState = { ...params, pageOffset: 0, pageMaxSize: pageSize };
     setSearchState(state);
     runSearch(state);
   }
@@ -80,6 +73,15 @@ export function SearchApp({ terms }: SearchAppProps) {
   function handlePageChange(pageOffset: number) {
     if (!searchState) return;
     const state = { ...searchState, pageOffset };
+    setSearchState(state);
+    runSearch(state);
+  }
+
+  // Changing rows-per-page resets to the first page and re-runs the same search.
+  function handlePageSizeChange(pageMaxSize: number) {
+    setPageSize(pageMaxSize);
+    if (!searchState) return;
+    const state = { ...searchState, pageMaxSize, pageOffset: 0 };
     setSearchState(state);
     runSearch(state);
   }
@@ -98,6 +100,7 @@ export function SearchApp({ terms }: SearchAppProps) {
         results={results}
         isLoading={isLoading}
         onPageChange={handlePageChange}
+        onPageSizeChange={handlePageSizeChange}
       />
     </div>
   );

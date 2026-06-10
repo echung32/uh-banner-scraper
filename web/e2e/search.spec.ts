@@ -14,12 +14,31 @@ async function totalSections(page: Page): Promise<number> {
   return match ? Number(match[1]) : 0;
 }
 
+// Each combobox's search box has a distinct placeholder — used to target the
+// right cmdk input even while a previous popover is still animating closed.
+const COMBO_PLACEHOLDER: Record<string, string> = {
+  term: "Search terms",
+  subject: "Search subjects",
+  campus: "Search campuses",
+  college: "Search colleges",
+  department: "Search departments",
+};
+
+/**
+ * Drives one of the form's Comboboxes (cmdk): open the trigger by its id, filter
+ * by `query`, then select the highlighted item with Enter. The command input is
+ * portalled outside the <form>, so Enter selects rather than submitting.
+ */
+async function pickCombobox(page: Page, triggerId: string, query: string) {
+  await page.locator(`#${triggerId}`).click();
+  const input = page.getByPlaceholder(COMBO_PLACEHOLDER[triggerId]);
+  await input.fill(query);
+  await input.press("Enter");
+}
+
 async function runSearch(page: Page, subject: string, courseNumber: string) {
-  // Clear then type key-by-key so React's controlled-input onChange fires
-  // reliably even when re-running a search with the same subject.
-  const subjectInput = page.getByLabel("Subject");
-  await subjectInput.fill("");
-  await subjectInput.pressSequentially(subject);
+  // Subject is an (optional) combobox; empty query selects "All Subjects".
+  await pickCombobox(page, "subject", subject || "All Subjects");
 
   const courseInput = page.getByLabel("Course Number");
   await courseInput.fill("");
@@ -30,22 +49,30 @@ async function runSearch(page: Page, subject: string, courseNumber: string) {
   await searchButton.click();
 }
 
-/** Picks an option from one of the form's selects by combobox + option label. */
-async function selectOption(page: Page, combobox: string, label: string) {
-  await page.getByRole("combobox", { name: combobox }).click();
-  await page.getByRole("option", { name: label, exact: true }).click();
-}
-const selectCampus = (page: Page, label: string) => selectOption(page, "Campus", label);
+const selectCampus = (page: Page, label: string) =>
+  pickCombobox(page, "campus", label);
 
 test.beforeEach(async ({ page }) => {
   await page.goto("/");
-  // The term <select> is populated from the mock's getTerms; wait for the app.
-  await expect(page.getByLabel("Subject")).toBeVisible();
+  // The Term combobox is populated from the seeded term table; wait for the app.
+  await expect(page.locator("#term")).toBeVisible();
 });
 
 test("loads the course search page with a populated term", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Course Search" })).toBeVisible();
-  await expect(page.getByRole("combobox", { name: "Term" })).toContainText("Fall 2026");
+  await expect(page.locator("#term")).toContainText("Fall 2026");
+});
+
+test("subject is optional — omitting it searches all subjects", async ({ page }) => {
+  // ICS only.
+  await runSearch(page, "ICS", "");
+  const icsOnly = await totalSections(page);
+  expect(icsOnly).toBeGreaterThan(0);
+
+  // "All Subjects" must return at least as many sections (a superset) without
+  // erroring — the read path treats an empty subject as no filter.
+  await runSearch(page, "", "");
+  expect(await totalSections(page)).toBeGreaterThanOrEqual(icsOnly);
 });
 
 test("subject search returns matching sections", async ({ page }) => {
@@ -83,13 +110,13 @@ test("college filter narrows results to the selected academic college", async ({
   expect(await totalSections(page)).toBe(6);
 
   // Filter to College of Natural Sciences → excludes the 2 ICS 311 sections.
-  await selectOption(page, "College", "College of Natural Sciences");
+  await pickCombobox(page, "college", "College of Natural Sciences");
   await runSearch(page, "ICS", "");
   await expect(page.getByText(/of 4 sections/)).toBeVisible();
   await expect(page.getByRole("cell", { name: "ICS 311" })).toHaveCount(0);
 
   // Switch to College of Engineering → only the 2 ICS 311 sections.
-  await selectOption(page, "College", "College of Engineering");
+  await pickCombobox(page, "college", "College of Engineering");
   await runSearch(page, "ICS", "");
   await expect(page.getByText(/of 2 sections/)).toBeVisible();
   await expect(page.getByRole("cell", { name: "ICS 311" })).toHaveCount(2);

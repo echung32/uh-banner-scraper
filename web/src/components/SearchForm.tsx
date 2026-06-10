@@ -4,13 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Combobox, type ComboboxOption } from "@/components/ui/combobox";
 import type { AutocompleteItem } from "@/lib/sis/types";
 import {
   UH_CAMPUSES,
@@ -19,20 +13,19 @@ import {
   campusDescriptionForCode,
 } from "@/lib/campuses";
 
-// Shared "no filter" sentinel for the facet selects (Radix forbids empty values).
-const ALL = "ALL";
+export interface SearchFormValues {
+  term: string;
+  subject: string;
+  courseNumber: string;
+  campus: string;
+  college: string;
+  department: string;
+  openOnly: boolean;
+}
 
 interface SearchFormProps {
   terms: AutocompleteItem[];
-  onSearch: (params: {
-    term: string;
-    subject: string;
-    courseNumber: string;
-    campus: string;
-    college: string;
-    department: string;
-    openOnly: boolean;
-  }) => void;
+  onSearch: (params: SearchFormValues) => void;
   isLoading: boolean;
 }
 
@@ -48,17 +41,49 @@ function pickDefaultTerm(terms: AutocompleteItem[]): string {
   return (regular ?? terms[0])?.code ?? "";
 }
 
+// Banner descriptions arrive HTML-encoded (e.g. "Auto Body Repair &amp; …");
+// decode the handful of common entities so labels read naturally.
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+const toOptions = (items: AutocompleteItem[]): ComboboxOption[] =>
+  items.map((i) => ({ value: i.code, label: decodeEntities(i.description) }));
+
 export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
   const [term, setTerm] = useState(() => pickDefaultTerm(terms));
   const [subject, setSubject] = useState("");
   const [courseNumber, setCourseNumber] = useState("");
   const [campus, setCampus] = useState(DEFAULT_CAMPUS);
-  const [college, setCollege] = useState(ALL);
-  const [department, setDepartment] = useState(ALL);
+  const [college, setCollege] = useState("");
+  const [department, setDepartment] = useState("");
   const [openOnly, setOpenOnly] = useState(false);
 
+  const [subjectOptions, setSubjectOptions] = useState<AutocompleteItem[]>([]);
   const [collegeOptions, setCollegeOptions] = useState<AutocompleteItem[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<AutocompleteItem[]>([]);
+
+  // Subjects depend only on the term (derived from the sections present).
+  useEffect(() => {
+    if (!term) return;
+    let cancelled = false;
+    fetch(`/api/filters?term=${encodeURIComponent(term)}&kind=subject`)
+      .then((r) => (r.ok ? r.json() : { options: [] }))
+      .then((d) => {
+        if (!cancelled) setSubjectOptions((d.options ?? []) as AutocompleteItem[]);
+      })
+      .catch(() => {
+        if (!cancelled) setSubjectOptions([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [term]);
 
   // College/Department options are catalog-derived and campus-specific, so
   // refetch whenever the term or campus changes (and reset the selections).
@@ -82,8 +107,8 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
       setCollegeOptions(col);
       setDepartmentOptions(dep);
     });
-    setCollege(ALL);
-    setDepartment(ALL);
+    setCollege("");
+    setDepartment("");
     return () => {
       cancelled = true;
     };
@@ -91,7 +116,7 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!term || !subject.trim()) return;
+    if (!term) return;
     onSearch({
       term,
       subject: subject.trim().toUpperCase(),
@@ -103,34 +128,42 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
     });
   }
 
+  const campusOptions: ComboboxOption[] = [
+    { value: ALL_CAMPUSES, label: "All Campuses" },
+    ...UH_CAMPUSES.map((c) => ({ value: c.code, label: c.description })),
+  ];
+
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
         <div className="space-y-2">
           <Label htmlFor="term">Term</Label>
-          <Select value={term} onValueChange={setTerm}>
-            <SelectTrigger id="term">
-              <SelectValue placeholder="Select a term" />
-            </SelectTrigger>
-            <SelectContent>
-              {terms.map((t) => (
-                <SelectItem key={t.code} value={t.code}>
-                  {t.description}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Combobox
+            id="term"
+            options={toOptions(terms)}
+            value={term}
+            onChange={setTerm}
+            placeholder="Select a term"
+            searchPlaceholder="Search terms…"
+            emptyText="No terms."
+          />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="subject">Subject</Label>
-          <Input
+          <Combobox
             id="subject"
-            placeholder="e.g. ICS"
+            options={subjectOptions.map((s) => ({
+              value: s.code,
+              label: `${s.code} — ${decodeEntities(s.description)}`,
+              keywords: s.description,
+            }))}
             value={subject}
-            onChange={(e) => setSubject(e.target.value)}
-            maxLength={10}
-            required
+            onChange={setSubject}
+            placeholder="All Subjects"
+            searchPlaceholder="Search subjects…"
+            emptyText="No subjects for this term."
+            clearLabel="All Subjects"
           />
         </div>
 
@@ -147,53 +180,43 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
 
         <div className="space-y-2">
           <Label htmlFor="campus">Campus</Label>
-          <Select value={campus} onValueChange={setCampus}>
-            <SelectTrigger id="campus">
-              <SelectValue placeholder="Select a campus" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_CAMPUSES}>All Campuses</SelectItem>
-              {UH_CAMPUSES.map((c) => (
-                <SelectItem key={c.code} value={c.code}>
-                  {c.description}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Combobox
+            id="campus"
+            options={campusOptions}
+            value={campus}
+            onChange={setCampus}
+            placeholder="Select a campus"
+            searchPlaceholder="Search campuses…"
+            emptyText="No campuses."
+          />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="college">College</Label>
-          <Select value={college} onValueChange={setCollege}>
-            <SelectTrigger id="college">
-              <SelectValue placeholder="All Colleges" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All Colleges</SelectItem>
-              {collegeOptions.map((c) => (
-                <SelectItem key={c.code} value={c.code}>
-                  {c.description}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Combobox
+            id="college"
+            options={toOptions(collegeOptions)}
+            value={college}
+            onChange={setCollege}
+            placeholder="All Colleges"
+            searchPlaceholder="Search colleges…"
+            emptyText="No colleges."
+            clearLabel="All Colleges"
+          />
         </div>
 
         <div className="space-y-2">
           <Label htmlFor="department">Department</Label>
-          <Select value={department} onValueChange={setDepartment}>
-            <SelectTrigger id="department">
-              <SelectValue placeholder="All Departments" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All Departments</SelectItem>
-              {departmentOptions.map((d) => (
-                <SelectItem key={d.code} value={d.code}>
-                  {d.description}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Combobox
+            id="department"
+            options={toOptions(departmentOptions)}
+            value={department}
+            onChange={setDepartment}
+            placeholder="All Departments"
+            searchPlaceholder="Search departments…"
+            emptyText="No departments."
+            clearLabel="All Departments"
+          />
         </div>
 
         <div className="flex items-center space-x-2 lg:pt-8">
@@ -206,7 +229,7 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
         </div>
 
         <div className="flex flex-col justify-end">
-          <Button type="submit" disabled={isLoading || !subject.trim()} className="w-full">
+          <Button type="submit" disabled={isLoading || !term} className="w-full">
             <Search className="h-4 w-4" />
             {isLoading ? "Searching…" : "Search"}
           </Button>

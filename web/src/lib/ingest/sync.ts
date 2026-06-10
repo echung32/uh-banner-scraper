@@ -44,7 +44,7 @@ function sleep(ms: number): Promise<void> {
 }
 
 /** Pulls every section for one (term, subject) across all result pages. */
-async function fetchAllSections(
+export async function fetchAllSections(
   session: SisSession,
   term: string,
   subject: string

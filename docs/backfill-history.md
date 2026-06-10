@@ -169,3 +169,24 @@ search-driven, email-keyed pass described above.
 - Catalog (college/dept only): `…/sync-details?term=<code>&filters=0&catalog=1&text=0&sections=0&instructors=0&delayMs=100`
 - Full catalog incl. text: same as above with `text=1` (4× the load — pace it)
 - Instructors: `…/sync-details?term=<code>&filters=0&catalog=0&sections=0&instructors=1&delayMs=80`
+- All terms (no backfill): `POST /api/admin/refresh-terms`
+
+## All terms populated + dynamic per-subject sync (2026-06-10)
+
+`POST /api/admin/refresh-terms` populated the `term` table with **all 100** Banner
+terms (Fall 2015 → Fall 2026, incl. Extension / Apprenticeship / Accelerated
+variants), descriptions + view-only flags + display order — **no section
+backfill**. Only Fall 2026 (`202710`) and Spring 2026 (`202630`) are eagerly
+backfilled; every other term has `last_synced_at IS NULL`.
+
+The remaining terms fill in **lazily, per `(term, subject)`, on first search**
+(`lib/ingest/dynamicSync.ensureTermSubject`, invoked from `/api/search`): a term
+that was never fully synced and a subject with no `subject` row yet → one live
+Banner sync of just that subject, stored, then served from D1 forever. A
+backfilled term has a `subject` row for every subject, so it never triggers.
+Disabled with `DYNAMIC_SYNC=0`.
+
+Verified live: first search of `ICS` in Summer 2026 (`202640`, unsynced) logged a
+`[SIS] dynamic sync 202640/ICS` and stored **62** sections; the second search was
+a pure `[DB]` hit. (So remote D1 now also holds Summer 2026 ICS — a sample of
+dynamic population, not a full backfill of that term.)

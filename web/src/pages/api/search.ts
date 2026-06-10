@@ -1,23 +1,27 @@
 import type { APIRoute } from "astro";
+import { getDb } from "@/lib/db/client";
 import { fetchSearchResults } from "@/lib/search";
+import { ensureTermSubject } from "@/lib/ingest/dynamicSync";
+import { logDb } from "@/lib/log";
 import type { SearchParams } from "@/lib/sis/types";
 
 export const GET: APIRoute = async ({ request }) => {
   const url = new URL(request.url);
   const term = url.searchParams.get("term");
-  const subject = url.searchParams.get("subject");
+  // Subject is optional — empty means "all subjects" (search across everything).
+  const subject = (url.searchParams.get("subject") ?? "").trim().toUpperCase();
 
-  if (!term || !subject) {
-    return new Response(
-      JSON.stringify({ error: "term and subject are required" }),
-      { status: 400, headers: { "Content-Type": "application/json" } }
-    );
+  if (!term) {
+    return new Response(JSON.stringify({ error: "term is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const pageOffset = parseInt(url.searchParams.get("pageOffset") ?? "0", 10);
   const pageMaxSize = Math.min(
-    parseInt(url.searchParams.get("pageMaxSize") ?? "10", 10),
-    50
+    parseInt(url.searchParams.get("pageMaxSize") ?? "20", 10),
+    100
   );
 
   const params: SearchParams = {
@@ -35,7 +39,16 @@ export const GET: APIRoute = async ({ request }) => {
   };
 
   try {
+    // For a not-yet-backfilled term, pull this subject from Banner on first
+    // search and store it (cache-on-miss); a no-op for backfilled terms and
+    // already-synced subjects. Then serve from D1 as usual.
+    if (subject) await ensureTermSubject(getDb(), term, subject);
+
     const results = await fetchSearchResults(params);
+    logDb(
+      `search ${params.term}/${params.subject || "*"} page ${params.pageOffset}+${params.pageMaxSize}` +
+        ` → ${results.sectionsFetchedCount}/${results.totalCount}`
+    );
     return new Response(JSON.stringify(results), {
       status: 200,
       headers: { "Content-Type": "application/json" },

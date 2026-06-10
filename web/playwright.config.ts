@@ -65,6 +65,10 @@ export default defineConfig({
         PORT: String(APP_PORT),
         // Read path serves from the seeded local D1; ingestion writes to it.
         D1_MODE: "local",
+        // Keep read-path searches off the (mock) SIS: the seeded terms have no
+        // last_synced_at, which would otherwise make them eligible for dynamic
+        // per-subject sync. Ingestion tests drive sync explicitly.
+        DYNAMIC_SYNC: "0",
         ADMIN_SECRET,
       },
       stdout: "pipe",

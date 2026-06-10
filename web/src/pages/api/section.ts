@@ -10,6 +10,7 @@ import type { APIRoute } from "astro";
 import { getDb } from "@/lib/db/client";
 import { fetchSectionDetail } from "@/lib/search";
 import { ensureSectionDetail } from "@/lib/ingest/sectionLazy";
+import { logDb } from "@/lib/log";
 
 function bad(message: string, status = 400): Response {
   return new Response(JSON.stringify({ error: message }), {
@@ -27,9 +28,9 @@ export const GET: APIRoute = async ({ request }) => {
 
   try {
     // D1 first; on a cold section, fetch live + store once (lazy cache-on-miss).
-    const detail =
-      (await fetchSectionDetail(term, crn)) ??
-      (await ensureSectionDetail(getDb(), term, crn));
+    const stored = await fetchSectionDetail(term, crn);
+    if (stored) logDb(`section detail ${term}:${crn} (cached)`);
+    const detail = stored ?? (await ensureSectionDetail(getDb(), term, crn));
     if (!detail) return bad("section detail not found", 404);
     return new Response(JSON.stringify(detail), {
       status: 200,
