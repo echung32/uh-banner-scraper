@@ -524,7 +524,6 @@ export async function searchCourses(
 
   const query = new URLSearchParams({
     txt_term: params.term,
-    txt_subject: params.subject,
     uniqueSessionId: session.uniqueSessionId,
     pageOffset: String(params.pageOffset),
     pageMaxSize: String(params.pageMaxSize),
@@ -533,6 +532,12 @@ export async function searchCourses(
     _: String(Date.now()),
   });
 
+  // Omit txt_subject for a whole-term search — Banner returns every subject's
+  // sections (sorted + paginated) when no subject is supplied. With a subject it
+  // scopes to that subject as before.
+  if (params.subject) {
+    query.set("txt_subject", params.subject);
+  }
   if (params.courseNumber) {
     query.set("txt_courseNumber", params.courseNumber);
   }

@@ -67,6 +67,7 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
   const [subjectOptions, setSubjectOptions] = useState<AutocompleteItem[]>([]);
   const [collegeOptions, setCollegeOptions] = useState<AutocompleteItem[]>([]);
   const [departmentOptions, setDepartmentOptions] = useState<AutocompleteItem[]>([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
 
   // Subjects depend only on the term (derived from the sections present).
   // Changing term also clears the term-specific selections (subject + course
@@ -108,10 +109,12 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
         .then((r) => (r.ok ? r.json() : { options: [] }))
         .then((d) => (d.options ?? []) as AutocompleteItem[])
         .catch(() => []);
+    setCatalogLoading(true);
     Promise.all([load("college"), load("department")]).then(([col, dep]) => {
       if (cancelled) return;
       setCollegeOptions(col);
       setDepartmentOptions(dep);
+      setCatalogLoading(false);
     });
     setCollege("");
     setDepartment("");
@@ -119,6 +122,13 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
       cancelled = true;
     };
   }, [term, campus]);
+
+  // College/Department are catalog-derived. They're empty (so unusable) for terms
+  // whose catalog isn't synced — every not-yet-backfilled ("dynamic") term, whose
+  // searches run through the page cache where these filters aren't applied. Disable
+  // the fields in that case so they don't look like a no-op the user can set.
+  const collegeUnavailable = !catalogLoading && collegeOptions.length === 0;
+  const departmentUnavailable = !catalogLoading && departmentOptions.length === 0;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -208,7 +218,13 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
             searchPlaceholder="Search colleges…"
             emptyText="No colleges."
             clearLabel="All Colleges"
+            disabled={collegeUnavailable}
           />
+          {collegeUnavailable && (
+            <p className="text-xs text-muted-foreground">
+              Not available until this term is backfilled.
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -222,7 +238,13 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
             searchPlaceholder="Search departments…"
             emptyText="No departments."
             clearLabel="All Departments"
+            disabled={departmentUnavailable}
           />
+          {departmentUnavailable && (
+            <p className="text-xs text-muted-foreground">
+              Not available until this term is backfilled.
+            </p>
+          )}
         </div>
 
         <div className="flex items-center space-x-2 lg:pt-8">

@@ -25,6 +25,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { SectionDetails } from "./SectionDetails";
+import { CoverageDialog, type CoverageParams } from "./CoverageDialog";
 import type { CourseSection, MeetingTime, SearchResultsResponse } from "@/lib/sis/types";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -35,6 +36,8 @@ const COLUMN_COUNT = 12;
 
 interface ResultsTableProps {
   results: SearchResultsResponse | null;
+  /** Current search's sort + filters, for the cache-coverage grid. */
+  searchParams: CoverageParams | null;
   isLoading: boolean;
   onPageChange: (pageOffset: number) => void;
   onPageSizeChange: (pageMaxSize: number) => void;
@@ -155,6 +158,7 @@ function SkeletonRows() {
 
 export function ResultsTable({
   results,
+  searchParams,
   isLoading,
   onPageChange,
   onPageSizeChange,
@@ -176,6 +180,12 @@ export function ResultsTable({
             {totalCount === 0
               ? "No results found"
               : `Showing ${pageOffset + 1}–${Math.min(pageOffset + pageMaxSize, totalCount)} of ${totalCount} sections`}
+            {totalCount > 0 && results?.coverage && searchParams && (
+              <>
+                {" · "}
+                <CoverageDialog params={searchParams} summary={results.coverage} />
+              </>
+            )}
           </span>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">

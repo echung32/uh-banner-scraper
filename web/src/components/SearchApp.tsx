@@ -98,6 +98,7 @@ export function SearchApp({ terms }: SearchAppProps) {
 
       <ResultsTable
         results={results}
+        searchParams={searchState}
         isLoading={isLoading}
         onPageChange={handlePageChange}
         onPageSizeChange={handlePageSizeChange}
