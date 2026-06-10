@@ -9,11 +9,16 @@ import { execSync } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 
+// Throwaway persist dir for e2e — kept separate from the default `.wrangler/state`
+// so seeding the fixture never wipes the real data a developer keeps locally.
+// Must match `--persist-to` in playwright.config.ts (the app server reads the
+// same D1 file this setup seeds).
+const E2E_PERSIST = ".wrangler-e2e";
+
 function findLocalD1File(): string {
   const dir = join(
     process.cwd(),
-    ".wrangler",
-    "state",
+    E2E_PERSIST,
     "v3",
     "d1",
     "miniflare-D1DatabaseObject"
@@ -23,7 +28,7 @@ function findLocalD1File(): string {
   );
   if (!file) {
     throw new Error(
-      `No local D1 file in ${dir}. Run: yarn wrangler d1 migrations apply uh-course-search-db --local`
+      `No local D1 file in ${dir}. Run: yarn wrangler d1 migrations apply uh-course-search-db --local --persist-to ${E2E_PERSIST}`
     );
   }
   return join(dir, file);
@@ -108,9 +113,10 @@ SECTIONS[0].faculty = [
 
 export default function globalSetup() {
   // Ensure the local D1 file exists with the current schema (idempotent).
-  execSync("yarn wrangler d1 migrations apply uh-course-search-db --local", {
-    stdio: "ignore",
-  });
+  execSync(
+    `yarn wrangler d1 migrations apply uh-course-search-db --local --persist-to ${E2E_PERSIST}`,
+    { stdio: "ignore" }
+  );
 
   const db = new DatabaseSync(findLocalD1File(), {
     enableForeignKeyConstraints: false,

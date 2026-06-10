@@ -34,6 +34,7 @@ yarn-error.log*
 
 # Cloudflare
 .wrangler
+.wrangler-e2e
 .dev.vars
 .tmp/
 # wrangler types output

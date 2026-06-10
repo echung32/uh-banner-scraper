@@ -13,6 +13,10 @@ const MOCK_SIS_PORT = 9999;
 const APP_PORT = 4321;
 const SIS_BASE_URL = `http://127.0.0.1:${MOCK_SIS_PORT}/StudentRegistrationSsb`;
 const ADMIN_SECRET = "e2e-admin-secret";
+// e2e seeds and mutates its own throwaway D1 here — NOT the default
+// `.wrangler/state` the dev server reads — so a test run never clobbers the real
+// data developers keep locally. global-setup.ts hardcodes the same path.
+const E2E_PERSIST = ".wrangler-e2e";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -71,6 +75,7 @@ export default defineConfig({
       //                       production leaves this unset, so those routes 501).
       command:
         `yarn build && yarn wrangler dev --ip 127.0.0.1 --port ${APP_PORT}` +
+        ` --persist-to ${E2E_PERSIST}` +
         ` --var SIS_BASE_URL:${SIS_BASE_URL}` +
         ` --var DYNAMIC_SYNC:1 --var COURSE_TEXT_LAZY:0 --var LOG_SOURCE:0` +
         ` --var INGEST_ON_WORKER:1 --var ADMIN_SECRET:${ADMIN_SECRET}`,
