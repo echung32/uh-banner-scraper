@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,6 +25,8 @@ export interface SearchFormValues {
 
 interface SearchFormProps {
   terms: AutocompleteItem[];
+  /** Draft seed, derived from the shareable URL state. */
+  initialValues: SearchFormValues;
   onSearch: (params: SearchFormValues) => void;
   isLoading: boolean;
 }
@@ -55,14 +57,23 @@ function decodeEntities(s: string): string {
 const toOptions = (items: AutocompleteItem[]): ComboboxOption[] =>
   items.map((i) => ({ value: i.code, label: decodeEntities(i.description) }));
 
-export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
-  const [term, setTerm] = useState(() => pickDefaultTerm(terms));
-  const [subject, setSubject] = useState("");
-  const [courseNumber, setCourseNumber] = useState("");
-  const [campus, setCampus] = useState(DEFAULT_CAMPUS);
-  const [college, setCollege] = useState("");
-  const [department, setDepartment] = useState("");
-  const [openOnly, setOpenOnly] = useState(false);
+export function SearchForm({
+  terms,
+  initialValues,
+  onSearch,
+  isLoading,
+}: SearchFormProps) {
+  // Seed the draft from the URL-derived values; fall back to the most recent
+  // regular term when the link carries none.
+  const [term, setTerm] = useState(
+    () => initialValues.term || pickDefaultTerm(terms),
+  );
+  const [subject, setSubject] = useState(initialValues.subject);
+  const [courseNumber, setCourseNumber] = useState(initialValues.courseNumber);
+  const [campus, setCampus] = useState(initialValues.campus || DEFAULT_CAMPUS);
+  const [college, setCollege] = useState(initialValues.college);
+  const [department, setDepartment] = useState(initialValues.department);
+  const [openOnly, setOpenOnly] = useState(initialValues.openOnly);
 
   const [subjectOptions, setSubjectOptions] = useState<AutocompleteItem[]>([]);
   const [collegeOptions, setCollegeOptions] = useState<AutocompleteItem[]>([]);
@@ -73,11 +84,17 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
   // Changing term also clears the term-specific selections (subject + course
   // number) — otherwise a stale value lingers in state (the combobox shows its
   // placeholder because the old subject isn't in the new term's list, but the
-  // old value is still submitted on the next search).
+  // old value is still submitted on the next search). The first run only seeds
+  // options for the (possibly URL-supplied) term — it must NOT clear the
+  // shared subject/course number.
+  const subjectSeeded = useRef(false);
   useEffect(() => {
     if (!term) return;
-    setSubject("");
-    setCourseNumber("");
+    if (subjectSeeded.current) {
+      setSubject("");
+      setCourseNumber("");
+    }
+    subjectSeeded.current = true;
     let cancelled = false;
     fetch(`/api/filters?term=${encodeURIComponent(term)}&kind=subject`)
       .then((r) => (r.ok ? r.json() : { options: [] }))
@@ -94,6 +111,7 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
 
   // College/Department options are catalog-derived and campus-specific, so
   // refetch whenever the term or campus changes (and reset the selections).
+  const catalogSeeded = useRef(false);
   useEffect(() => {
     if (!term) return;
     const campusDesc =
@@ -116,8 +134,12 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
       setDepartmentOptions(dep);
       setCatalogLoading(false);
     });
-    setCollege("");
-    setDepartment("");
+    // Skip clearing on the first run so a shared college/department survives.
+    if (catalogSeeded.current) {
+      setCollege("");
+      setDepartment("");
+    }
+    catalogSeeded.current = true;
     return () => {
       cancelled = true;
     };

@@ -164,6 +164,30 @@ test("expanding a section row shows catalog, lazily-fetched detail, and instruct
   await expect(page.getByText("jane@hawaii.edu")).toHaveCount(0);
 });
 
+test("a shared URL pre-fills the form and auto-runs the search", async ({ page }) => {
+  // Open a link carrying the executed search in the querystring (as another user
+  // would receive it). Campus is left at the default (Manoa), so 6 ICS sections.
+  await page.goto("/?term=202710&subject=ICS&courseNumber=111");
+
+  // The form is seeded from the URL — no manual selection/submit.
+  await expect(page.locator("#term")).toContainText("Fall 2026");
+  await expect(page.locator("#subject")).toContainText("ICS");
+  await expect(page.getByLabel("Course Number")).toHaveValue("111");
+
+  // …and the results render on their own (2 ICS 111 sections at Manoa).
+  await expect(page.getByText(/of 2 sections/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: "ICS 311" })).toHaveCount(0);
+});
+
+test("running a search reflects the filters in the URL", async ({ page }) => {
+  await runSearch(page, "ICS", "111");
+  await expect(page.getByText(/of 2 sections/)).toBeVisible();
+
+  // The address bar now carries the executed search, ready to share.
+  await expect(page).toHaveURL(/[?&]subject=ICS\b/);
+  await expect(page).toHaveURL(/[?&]courseNumber=111\b/);
+});
+
 test("course number filter narrows the results", async ({ page }) => {
   // First search: subject only.
   await runSearch(page, "ICS", "");

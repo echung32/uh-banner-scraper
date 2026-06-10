@@ -1,14 +1,39 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import {
+  useQueryStates,
+  parseAsString,
+  parseAsBoolean,
+  parseAsInteger,
+} from "nuqs";
+import { NuqsAdapter } from "nuqs/adapters/react";
 import { SearchForm, type SearchFormValues } from "./SearchForm";
 import { ResultsTable } from "./ResultsTable";
-import { ALL_CAMPUSES } from "@/lib/campuses";
+import type { CoverageParams } from "./CoverageDialog";
+import { ALL_CAMPUSES, DEFAULT_CAMPUS } from "@/lib/campuses";
 import type { AutocompleteItem, SearchResultsResponse } from "@/lib/sis/types";
 
 interface SearchAppProps {
   terms: AutocompleteItem[];
 }
 
-interface SearchState {
+const DEFAULT_PAGE_SIZE = 20;
+
+// The executed search lives entirely in the URL (shareable). Default values are
+// omitted from the querystring so links stay clean. `page` is 1-based for
+// readability; it maps to the API's 0-based `pageOffset`.
+const searchParsers = {
+  term: parseAsString.withDefault(""),
+  subject: parseAsString.withDefault(""),
+  courseNumber: parseAsString.withDefault(""),
+  campus: parseAsString.withDefault(DEFAULT_CAMPUS),
+  college: parseAsString.withDefault(""),
+  department: parseAsString.withDefault(""),
+  openOnly: parseAsBoolean.withDefault(false),
+  page: parseAsInteger.withDefault(1),
+  size: parseAsInteger.withDefault(DEFAULT_PAGE_SIZE),
+};
+
+interface SearchQuery {
   term: string;
   subject: string;
   courseNumber: string;
@@ -16,27 +41,26 @@ interface SearchState {
   college: string;
   department: string;
   openOnly: boolean;
-  pageOffset: number;
-  pageMaxSize: number;
+  page: number;
+  size: number;
 }
 
-const DEFAULT_PAGE_SIZE = 20;
-
-export function SearchApp({ terms }: SearchAppProps) {
+function SearchAppInner({ terms }: SearchAppProps) {
   const [results, setResults] = useState<SearchResultsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [searchState, setSearchState] = useState<SearchState | null>(null);
-  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  // `push` so each committed search / page change is its own history entry —
+  // the browser Back/Forward buttons then step through prior searches.
+  const [q, setQ] = useQueryStates(searchParsers, { history: "push" });
 
-  async function runSearch(params: SearchState) {
+  async function runSearch(params: SearchQuery) {
     setIsLoading(true);
     setError(null);
 
     const query = new URLSearchParams({
       term: params.term,
-      pageOffset: String(params.pageOffset),
-      pageMaxSize: String(params.pageMaxSize),
+      pageOffset: String((params.page - 1) * params.size),
+      pageMaxSize: String(params.size),
       openOnly: String(params.openOnly),
     });
     if (params.subject) query.set("subject", params.subject);
@@ -64,31 +88,83 @@ export function SearchApp({ terms }: SearchAppProps) {
     }
   }
 
+  // The URL is the source of truth: run the search whenever the committed query
+  // changes — including on mount, so a shared link reproduces its results.
+  useEffect(() => {
+    if (!q.term) return;
+    runSearch(q);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    q.term,
+    q.subject,
+    q.courseNumber,
+    q.campus,
+    q.college,
+    q.department,
+    q.openOnly,
+    q.page,
+    q.size,
+  ]);
+
+  // Committing a new search resets to the first page.
   function handleSearch(params: SearchFormValues) {
-    const state: SearchState = { ...params, pageOffset: 0, pageMaxSize: pageSize };
-    setSearchState(state);
-    runSearch(state);
+    setQ({ ...params, page: 1 });
   }
 
+  // ResultsTable reports the desired 0-based offset; translate to a 1-based page.
   function handlePageChange(pageOffset: number) {
-    if (!searchState) return;
-    const state = { ...searchState, pageOffset };
-    setSearchState(state);
-    runSearch(state);
+    setQ({ page: Math.floor(pageOffset / q.size) + 1 });
   }
 
-  // Changing rows-per-page resets to the first page and re-runs the same search.
+  // Changing rows-per-page resets to the first page.
   function handlePageSizeChange(pageMaxSize: number) {
-    setPageSize(pageMaxSize);
-    if (!searchState) return;
-    const state = { ...searchState, pageMaxSize, pageOffset: 0 };
-    setSearchState(state);
-    runSearch(state);
+    setQ({ size: pageMaxSize, page: 1 });
   }
+
+  // Form draft seed + coverage key both derive from the committed URL query.
+  const formValues: SearchFormValues = {
+    term: q.term,
+    subject: q.subject,
+    courseNumber: q.courseNumber,
+    campus: q.campus,
+    college: q.college,
+    department: q.department,
+    openOnly: q.openOnly,
+  };
+  // Remount the form whenever the committed filters change (a new search or a
+  // Back/Forward navigation) so its draft re-seeds from the URL. Paging changes
+  // only page/size, which aren't in the key, so it doesn't remount the form.
+  const formKey = [
+    q.term,
+    q.subject,
+    q.courseNumber,
+    q.campus,
+    q.college,
+    q.department,
+    q.openOnly,
+  ].join("|");
+  const coverageParams: CoverageParams | null = q.term
+    ? {
+        term: q.term,
+        subject: q.subject,
+        courseNumber: q.courseNumber || undefined,
+        campus:
+          q.campus && q.campus !== ALL_CAMPUSES ? q.campus : undefined,
+        college: q.college || undefined,
+        department: q.department || undefined,
+        openOnly: q.openOnly,
+      }
+    : null;
 
   return (
     <div className="space-y-6">
-      <SearchForm terms={terms} onSearch={handleSearch} isLoading={isLoading} />
+      <SearchForm
+        key={formKey}
+        terms={terms}
+        initialValues={formValues}
+        onSearch={handleSearch}
+        isLoading={isLoading}
+      />
 
       {error && (
         <div className="rounded-md border border-destructive/50 bg-destructive/10 p-4 text-sm text-destructive">
@@ -98,11 +174,19 @@ export function SearchApp({ terms }: SearchAppProps) {
 
       <ResultsTable
         results={results}
-        searchParams={searchState}
+        searchParams={coverageParams}
         isLoading={isLoading}
         onPageChange={handlePageChange}
         onPageSizeChange={handlePageSizeChange}
       />
     </div>
+  );
+}
+
+export function SearchApp(props: SearchAppProps) {
+  return (
+    <NuqsAdapter>
+      <SearchAppInner {...props} />
+    </NuqsAdapter>
   );
 }

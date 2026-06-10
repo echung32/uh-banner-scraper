@@ -29,7 +29,7 @@ try {
           {fetchError}
         </div>
       ) : (
-        <SearchApp terms={terms} client:load />
+        <SearchApp terms={terms} client:only="react" />
       )
     }
   </div>
