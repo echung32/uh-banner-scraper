@@ -282,6 +282,59 @@ export async function upsertCourse(
     .run();
 }
 
+export interface CourseTextUpdate {
+  description: string | null;
+  prerequisites: string | null;
+  corequisites: string | null;
+  rawDescriptionHtml: string | null;
+  rawPrereqHtml: string | null;
+  rawCoreqHtml: string | null;
+}
+
+/**
+ * Updates ONLY the catalog-text columns of an existing `course` row (lazy
+ * course-text path). COALESCE so a failed/empty fragment never overwrites
+ * existing text; the catalog facts (college/department/…) are untouched, so this
+ * can run without re-fetching getSectionCatalogDetails. `raw_description_html`
+ * doubles as the "text fetched" marker that stops the lazy path refetching.
+ */
+export async function updateCourseText(
+  db: D1Like,
+  term: string,
+  campusDescription: string,
+  subject: string,
+  courseNumber: string,
+  t: CourseTextUpdate,
+  syncedAt: number
+): Promise<void> {
+  await db
+    .prepare(
+      `UPDATE course SET
+         description = COALESCE(?, description),
+         prerequisites = COALESCE(?, prerequisites),
+         corequisites = COALESCE(?, corequisites),
+         raw_description_html = COALESCE(?, raw_description_html),
+         raw_prereq_html = COALESCE(?, raw_prereq_html),
+         raw_coreq_html = COALESCE(?, raw_coreq_html),
+         synced_at = ?
+       WHERE term = ? AND campus_description = ? AND subject = ? AND course_number = ?`
+    )
+    .bind(
+      t.description,
+      t.prerequisites,
+      t.corequisites,
+      t.rawDescriptionHtml,
+      t.rawPrereqHtml,
+      t.rawCoreqHtml,
+      syncedAt,
+      term,
+      campusDescription,
+      subject,
+      courseNumber
+    )
+    .run();
+}
+
 export interface SectionDetailUpsert {
   restrictions: unknown | null;
   fees: unknown | null;

@@ -69,6 +69,9 @@ export default defineConfig({
         // last_synced_at, which would otherwise make them eligible for dynamic
         // per-subject sync. Ingestion tests drive sync explicitly.
         DYNAMIC_SYNC: "0",
+        // Likewise keep the course panel off the SIS — the seeded course rows
+        // have a NULL description, which would otherwise trigger lazy text fetch.
+        COURSE_TEXT_LAZY: "0",
         ADMIN_SECRET,
       },
       stdout: "pipe",
