@@ -12,18 +12,28 @@
 		"ghcr.io/devcontainer-community/devcontainer-features/ripgrep:1": {
 			"version": "latest"
 		},
-		"ghcr.io/devcontainers-extra/features/claude-code:2": {
-			"version": "latest"
-		},
-		"ghcr.io/esimkowitz/devcontainer-features/claude-code-persistence:1": {
-			"persistClaudeDir": true,
-			"persistClaudeJson": true
-		},
+		"ghcr.io/anthropics/devcontainer-features/claude-code:1.0": {},
 		"ghcr.io/postfinance/devcontainer-features/playwright-deps:1": {
 			"installChromiumDeps": true,
 			"installFirefoxDeps": true,
 			"installWebkitDeps": true
 		}
 	},
-	"onCreateCommand": "curl https://get.volta.sh | bash"
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"anthropic.claude-code"
+			],
+			"settings": {
+				"editor.formatOnSave": true
+			}
+		}
+	},
+	"mounts": [
+		"source=claude-code-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
+		"source=claude-code-config-${devcontainerId},target=/home/vscode/.claude,type=volume"
+	],
+	"remoteUser": "vscode",
+	"onCreateCommand": "curl https://get.volta.sh | bash",
+	"postStartCommand": "sudo mkdir -p /home/vscode/.claude && sudo chown -R vscode:vscode /home/vscode/.claude"
 }
