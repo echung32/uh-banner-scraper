@@ -34,7 +34,7 @@ const { title = "UH Course Search" } = Astro.props;
         <div class="flex items-center gap-2">
           <span class="text-lg font-semibold tracking-tight">UH Course Search</span>
           <span class="hidden text-xs text-muted-foreground sm:inline">
-            Banner SSB9
+            Unofficial
           </span>
         </div>
         <ThemeToggle client:load />
@@ -46,7 +46,10 @@ const { title = "UH Course Search" } = Astro.props;
     </main>
 
     <footer class="border-t py-4 text-center text-xs text-muted-foreground">
-      Data sourced from the University of Hawaii Student Information System.
+      <p>Data sourced from the University of Hawaii Student Information System.</p>
+      <p class="mt-1">
+        Unofficial project not affiliated with or endorsed by the University of Hawaii or Ellucian.
+      </p>
     </footer>
   </body>
 </html>
