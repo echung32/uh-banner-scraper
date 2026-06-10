@@ -75,6 +75,17 @@ test("subject is optional — omitting it searches all subjects", async ({ page 
   expect(await totalSections(page)).toBeGreaterThanOrEqual(icsOnly);
 });
 
+test("changing term clears the subject selection", async ({ page }) => {
+  // Pick a subject in the default (Fall) term.
+  await pickCombobox(page, "subject", "ICS");
+  await expect(page.locator("#subject")).toContainText("ICS");
+
+  // Switching term must reset the subject to the "All Subjects" placeholder —
+  // otherwise the stale value would be submitted on the next search.
+  await pickCombobox(page, "term", "Spring 2026");
+  await expect(page.locator("#subject")).toContainText("All Subjects");
+});
+
 test("subject search returns matching sections", async ({ page }) => {
   await runSearch(page, "ICS", "");
   // The mock catalog has 6 ICS sections total.

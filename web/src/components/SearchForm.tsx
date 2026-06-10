@@ -69,8 +69,14 @@ export function SearchForm({ terms, onSearch, isLoading }: SearchFormProps) {
   const [departmentOptions, setDepartmentOptions] = useState<AutocompleteItem[]>([]);
 
   // Subjects depend only on the term (derived from the sections present).
+  // Changing term also clears the term-specific selections (subject + course
+  // number) — otherwise a stale value lingers in state (the combobox shows its
+  // placeholder because the old subject isn't in the new term's list, but the
+  // old value is still submitted on the next search).
   useEffect(() => {
     if (!term) return;
+    setSubject("");
+    setCourseNumber("");
     let cancelled = false;
     fetch(`/api/filters?term=${encodeURIComponent(term)}&kind=subject`)
       .then((r) => (r.ok ? r.json() : { options: [] }))
