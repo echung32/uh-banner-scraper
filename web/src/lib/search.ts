@@ -11,13 +11,16 @@ import {
   getFilterOptions,
   getInstructor,
   getSectionDetail,
+  getSearchPageFromChunks,
   getSubjectFacet,
+  getTermSyncMeta,
   getTerms,
   searchSections,
   type CourseCatalog,
   type FilterKind,
   type Instructor,
   type SectionDetail,
+  type TermSyncMeta,
 } from "@/lib/db/queries";
 import type {
   AutocompleteItem,
@@ -33,6 +36,18 @@ export async function fetchSearchResults(
   params: SearchParams
 ): Promise<SearchResultsResponse> {
   return searchSections(getDb(), params);
+}
+
+/** Page-cache read for a dynamic term (assembled from cached windows). */
+export async function fetchSearchPage(
+  params: SearchParams
+): Promise<SearchResultsResponse> {
+  return getSearchPageFromChunks(getDb(), params);
+}
+
+/** Sync state for a term (null if unknown) — drives the search route's branch. */
+export async function fetchTermSyncMeta(term: string): Promise<TermSyncMeta | null> {
+  return getTermSyncMeta(getDb(), term);
 }
 
 export async function fetchFilterOptions(

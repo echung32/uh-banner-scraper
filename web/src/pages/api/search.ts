@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { getDb } from "@/lib/db/client";
-import { fetchSearchResults } from "@/lib/search";
-import { ensureTermSubject } from "@/lib/ingest/dynamicSync";
+import { fetchSearchPage, fetchSearchResults } from "@/lib/search";
+import { ensureSearchPage } from "@/lib/ingest/pageCache";
 import { logDb } from "@/lib/log";
 import type { SearchParams } from "@/lib/sis/types";
 
@@ -39,14 +39,17 @@ export const GET: APIRoute = async ({ request }) => {
   };
 
   try {
-    // For a not-yet-backfilled term, pull this subject from Banner on first
-    // search and store it (cache-on-miss); a no-op for backfilled terms and
-    // already-synced subjects. Then serve from D1 as usual.
-    if (subject) await ensureTermSubject(getDb(), term, subject);
-
-    const results = await fetchSearchResults(params);
+    // Dynamic (not-yet-backfilled) terms serve from the demand-driven page cache:
+    // ensureSearchPage fills the viewed window(s) from Banner on a miss, then we
+    // assemble the page from D1. It returns false for backfilled/unknown terms (or
+    // when DYNAMIC_SYNC is off), in which case we serve from the SQL read path.
+    const viaPageCache = await ensureSearchPage(getDb(), params);
+    const results = viaPageCache
+      ? await fetchSearchPage(params)
+      : await fetchSearchResults(params);
     logDb(
       `search ${params.term}/${params.subject || "*"} page ${params.pageOffset}+${params.pageMaxSize}` +
+        `${viaPageCache ? " (page-cache)" : ""}` +
         ` → ${results.sectionsFetchedCount}/${results.totalCount}`
     );
     return new Response(JSON.stringify(results), {

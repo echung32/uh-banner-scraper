@@ -121,6 +121,24 @@ test("details sync persists filter options and course catalog", async ({ request
   expect(missing.status()).toBe(404);
 });
 
+test("page cache serves a dynamic term from Banner, then from D1", async ({ request }) => {
+  // 202740 is seeded dynamic (last_synced_at NULL) with no sections. An
+  // "All Subjects" search must fetch the whole-term page live from Banner (the
+  // mock returns every subject for an empty txt_subject), store it, and assemble
+  // the page from the cache. This is the regression guard for the original bug:
+  // a subject-less search on a not-yet-backfilled term returned nothing.
+  const DYN = "202740";
+  expect(await searchCount(request, { term: DYN, pageMaxSize: "50" })).toBe(9); // 6 ICS + 3 MATH
+
+  // A subject-scoped page on the same dynamic term (a distinct cache key).
+  expect(await searchCount(request, { term: DYN, subject: "ICS", pageMaxSize: "50" })).toBe(6);
+
+  // Revisiting the all-subjects page is served from the cache and is consistent;
+  // the sections are now durably in D1 and individually searchable.
+  expect(await searchCount(request, { term: DYN, pageMaxSize: "50" })).toBe(9);
+  expect(await searchCount(request, { term: DYN, subject: "MATH", pageMaxSize: "50" })).toBe(3);
+});
+
 test("admin sync rejects requests without the secret", async ({ request }) => {
   const res = await request.post(`/api/admin/sync?term=${TERM}`, {
     headers: { "content-type": "application/json" },

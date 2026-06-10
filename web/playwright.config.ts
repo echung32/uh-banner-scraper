@@ -65,10 +65,11 @@ export default defineConfig({
         PORT: String(APP_PORT),
         // Read path serves from the seeded local D1; ingestion writes to it.
         D1_MODE: "local",
-        // Keep read-path searches off the (mock) SIS: the seeded terms have no
-        // last_synced_at, which would otherwise make them eligible for dynamic
-        // per-subject sync. Ingestion tests drive sync explicitly.
-        DYNAMIC_SYNC: "0",
+        // The seeded read-path terms are marked backfilled (last_synced_at set in
+        // global-setup), so their searches serve from D1 via the SQL path, never
+        // the live page cache. DYNAMIC_SYNC is on so the ingestion spec can
+        // exercise the demand-driven page cache against the dynamic term (202740).
+        DYNAMIC_SYNC: "1",
         // Likewise keep the course panel off the SIS — the seeded course rows
         // have a NULL description, which would otherwise trigger lazy text fetch.
         COURSE_TEXT_LAZY: "0",

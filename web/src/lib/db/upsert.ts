@@ -103,6 +103,77 @@ export async function replaceSubjectSections(
   return sectionRows.length;
 }
 
+// Every section column except the (term, crn) primary key — the ON CONFLICT
+// UPDATE list for upsertSections.
+const SECTION_UPDATE_COLUMNS = SECTION_COLUMNS.filter(
+  (c) => c !== "term" && c !== "crn"
+);
+
+/** Builds a multi-row upsert (`INSERT … ON CONFLICT(term,crn) DO UPDATE`). */
+function upsertSectionStatement(
+  db: D1Like,
+  rows: CourseSectionRow[]
+): D1PreparedStatement {
+  const placeholders = rows
+    .map(() => `(${SECTION_COLUMNS.map(() => "?").join(",")})`)
+    .join(",");
+  const setClause = SECTION_UPDATE_COLUMNS.map(
+    (c) => `${String(c)} = excluded.${String(c)}`
+  ).join(", ");
+  const sql =
+    `INSERT INTO course_section (${SECTION_COLUMNS.join(",")}) VALUES ${placeholders}` +
+    ` ON CONFLICT(term, crn) DO UPDATE SET ${setClause}`;
+  const binds = rows.flatMap((r) => SECTION_COLUMNS.map((c) => r[c] ?? null));
+  return db.prepare(sql).bind(...binds);
+}
+
+/**
+ * Idempotent upsert of sections keyed by (term, crn) — used by the demand-driven
+ * page cache (lib/ingest/pageCache), where the same CRN can re-appear across
+ * pages or filters. Unlike replaceSubjectSections there is NO subject-scoped
+ * delete (and so no empty window): each row is inserted-or-updated in place, and
+ * child faculty/meeting rows are refreshed per CRN. All sections must belong to
+ * one term. Returns the number of sections written.
+ */
+export async function upsertSections(
+  db: D1Like,
+  sections: CourseSection[],
+  syncedAt: number
+): Promise<number> {
+  if (sections.length === 0) return 0;
+  const term = sections[0].term;
+  const crns = sections.map((s) => s.courseReferenceNumber);
+  const sectionRows = sections.map((s) => sectionToRow(s, syncedAt));
+  const facultyRows = sections.flatMap(sectionToFacultyRows);
+  const meetingRows = sections.flatMap(sectionToMeetingRows);
+
+  // Refresh child rows for just these CRNs (delete-then-insert; not relying on FK
+  // cascade, which D1/local differ on). Keep the IN-list under the 100-param cap.
+  for (const part of chunk(crns, 90)) {
+    const inList = part.map(() => "?").join(",");
+    await db.batch([
+      db
+        .prepare(`DELETE FROM section_faculty WHERE term = ? AND crn IN (${inList})`)
+        .bind(term, ...part),
+      db
+        .prepare(`DELETE FROM section_meeting WHERE term = ? AND crn IN (${inList})`)
+        .bind(term, ...part),
+    ]);
+  }
+
+  for (const part of chunk(sectionRows, rowsPerChunk(SECTION_COLUMNS.length))) {
+    await db.batch([upsertSectionStatement(db, part)]);
+  }
+  for (const part of chunk(facultyRows, rowsPerChunk(FACULTY_COLUMNS.length))) {
+    await db.batch([insertStatement(db, "section_faculty", FACULTY_COLUMNS, part)]);
+  }
+  for (const part of chunk(meetingRows, rowsPerChunk(MEETING_COLUMNS.length))) {
+    await db.batch([insertStatement(db, "section_meeting", MEETING_COLUMNS, part)]);
+  }
+
+  return sectionRows.length;
+}
+
 /** Refreshes the term table from Banner's term list; recomputes view-only. */
 export async function upsertTerms(db: D1Like, terms: AutocompleteItem[]): Promise<void> {
   const statements = terms.map((t, i) =>

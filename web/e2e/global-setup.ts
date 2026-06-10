@@ -134,13 +134,18 @@ export default function globalSetup() {
   }
 
   const term = db.prepare(
-    "INSERT INTO term (code, description, is_view_only, display_order) VALUES (?, ?, 0, ?)"
+    "INSERT INTO term (code, description, is_view_only, display_order, last_synced_at) VALUES (?, ?, 0, ?, ?)"
   );
   // 202710 has the higher display_order so it stays first / the default term for
   // the read-path tests. 202730 exists (no sections) so the ingestion test can
-  // sync into it and exercise the seat-refresh cooldown.
-  term.run("202710", "Fall 2026", 2);
-  term.run("202730", "Spring 2026", 1);
+  // sync into it and exercise the seat-refresh cooldown. Both are marked
+  // backfilled (last_synced_at set) so read-path searches stay on the SQL path —
+  // not the demand-driven page cache — even with DYNAMIC_SYNC on. 202740 is left
+  // dynamic (last_synced_at NULL) for the page-cache ingestion test.
+  const SYNCED = 1_700_000_000_000;
+  term.run("202710", "Fall 2026", 2, SYNCED);
+  term.run("202730", "Spring 2026", 1, SYNCED);
+  term.run("202740", "Summer 2026", 0, null);
 
   const insert = db.prepare(
     `INSERT INTO course_section

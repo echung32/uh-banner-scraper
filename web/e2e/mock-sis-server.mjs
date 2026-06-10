@@ -406,9 +406,11 @@ const server = createServer(async (req, res) => {
     const effective = session.storedCriteria;
 
     const term = url.searchParams.get("txt_term") ?? "202710";
+    // An empty subject is a whole-term search (Banner returns every subject) —
+    // this is what the demand-driven page cache uses for an "All Subjects" page.
     const data = CATALOG.filter(
       (s) =>
-        s.subject === effective.subject &&
+        (!effective.subject || s.subject === effective.subject) &&
         (!effective.courseNumber || s.courseNumber === effective.courseNumber)
     ).map((s) => ({ ...s, term, termDesc: null }));
 

@@ -34,6 +34,30 @@ function resolveSort(column: string | undefined, direction: string | undefined):
   return `cs.${col} ${dir}, cs.term ASC, cs.crn ASC`;
 }
 
+export interface TermSyncMeta {
+  /** Epoch-ms of the last full backfill, or null if never backfilled (dynamic). */
+  lastSyncedAt: number | null;
+  /** Past terms (description ends "(View Only)") are immutable. */
+  isViewOnly: boolean;
+}
+
+/**
+ * Sync state for one term, or null if unknown. Drives the search route's branch
+ * (backfilled → SQL path; dynamic → page cache) and the page cache's staleness
+ * rule (view-only windows never expire).
+ */
+export async function getTermSyncMeta(
+  db: D1Like,
+  term: string
+): Promise<TermSyncMeta | null> {
+  const row = await db
+    .prepare("SELECT last_synced_at, is_view_only FROM term WHERE code = ?")
+    .bind(term)
+    .first<{ last_synced_at: number | null; is_view_only: number }>();
+  if (!row) return null;
+  return { lastSyncedAt: row.last_synced_at, isViewOnly: row.is_view_only === 1 };
+}
+
 /** Serves the term dropdown from D1, preserving Banner's verbatim descriptions. */
 export async function getTerms(db: D1Like): Promise<AutocompleteItem[]> {
   const { results } = await db
@@ -370,6 +394,134 @@ export async function searchSections(
     pageOffset: params.pageOffset,
     pageMaxSize: params.pageMaxSize,
     sectionsFetchedCount: results.length,
+    pathMode: "search",
+  };
+}
+
+// ── demand-driven page cache (dynamic terms) ─────────────────────────────────
+//
+// Dynamic (not-yet-backfilled) terms serve searches from a per-window cache
+// (search_chunk) filled live from Banner one page at a time. The read side here
+// reconstructs a page from already-cached windows; the fill side is
+// lib/ingest/pageCache. See migrations/0006_search_chunk.sql.
+
+/** Internal page-cache granularity — rows per stored window (offset-aligned). */
+export const CHUNK_SIZE = 50;
+
+/**
+ * Canonical signature of the filters Banner actually applies on a live dynamic-
+ * term page (subject / course number / open-only). college/department are
+ * catalog-derived and unavailable for dynamic terms, so they're excluded.
+ */
+export function filterSignature(params: SearchParams): string {
+  return JSON.stringify({
+    subject: params.subject || "",
+    courseNumber: params.courseNumber || "",
+    openOnly: params.openOnly ? 1 : 0,
+  });
+}
+
+/** The chunk indices whose windows overlap `[offset, offset + size)`. */
+export function chunkIndicesFor(offset: number, size: number): number[] {
+  if (size <= 0) return [];
+  const first = Math.floor(offset / CHUNK_SIZE);
+  const last = Math.floor((offset + size - 1) / CHUNK_SIZE);
+  const out: number[] = [];
+  for (let i = first; i <= last; i++) out.push(i);
+  return out;
+}
+
+function chunkArr<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+/**
+ * Serves one search page for a dynamic term from the cached windows, in Banner's
+ * order. Reconstructs the absolute CRN sequence across the covering chunks, slices
+ * to the requested window, then loads those sections' raw_json from
+ * course_section. A page is only as complete as its chunks — the caller
+ * (ensureSearchPage) fills any missing/stale windows first; with DYNAMIC_SYNC off
+ * an uncached page simply comes back empty.
+ */
+export async function getSearchPageFromChunks(
+  db: D1Like,
+  params: SearchParams
+): Promise<SearchResultsResponse> {
+  const sortColumn = params.sortColumn ?? "subjectDescription";
+  const sortDirection = (params.sortDirection ?? "asc").toLowerCase() === "desc"
+    ? "desc"
+    : "asc";
+  const sig = filterSignature(params);
+  const indices = chunkIndicesFor(params.pageOffset, params.pageMaxSize);
+
+  const empty = (totalCount = 0): SearchResultsResponse => ({
+    success: true,
+    totalCount,
+    data: [],
+    pageOffset: params.pageOffset,
+    pageMaxSize: params.pageMaxSize,
+    sectionsFetchedCount: 0,
+    pathMode: "search",
+  });
+  if (indices.length === 0) return empty();
+
+  const ph = indices.map(() => "?").join(",");
+  const { results } = await db
+    .prepare(
+      `SELECT chunk_index, crns_json, total_count FROM search_chunk
+         WHERE term = ? AND filter_sig = ? AND sort_column = ? AND sort_direction = ?
+           AND chunk_index IN (${ph})
+         ORDER BY chunk_index ASC`
+    )
+    .bind(params.term, sig, sortColumn, sortDirection, ...indices)
+    .all<{ chunk_index: number; crns_json: string; total_count: number }>();
+  if (results.length === 0) return empty();
+
+  const totalCount = results[0].total_count;
+  const crnsByChunk = new Map<number, string[]>();
+  for (const r of results) {
+    crnsByChunk.set(r.chunk_index, JSON.parse(r.crns_json) as string[]);
+  }
+
+  // Walk the requested absolute positions; stop at a missing chunk or past the
+  // real end of data (a partial last window, or beyond totalCount).
+  const pageCrns: string[] = [];
+  const end = Math.min(params.pageOffset + params.pageMaxSize, totalCount);
+  for (let p = params.pageOffset; p < end; p++) {
+    const ci = Math.floor(p / CHUNK_SIZE);
+    const arr = crnsByChunk.get(ci);
+    if (!arr) break;
+    const within = p - ci * CHUNK_SIZE;
+    if (within >= arr.length) break;
+    pageCrns.push(arr[within]);
+  }
+  if (pageCrns.length === 0) return empty(totalCount);
+
+  // Load the section bodies (keep IN-lists under the 100-param cap), then restore
+  // Banner's order.
+  const rawByCrn = new Map<string, string>();
+  for (const part of chunkArr(pageCrns, 90)) {
+    const inPh = part.map(() => "?").join(",");
+    const { results: rows } = await db
+      .prepare(`SELECT crn, raw_json FROM course_section WHERE term = ? AND crn IN (${inPh})`)
+      .bind(params.term, ...part)
+      .all<{ crn: string; raw_json: string }>();
+    for (const r of rows) rawByCrn.set(r.crn, r.raw_json);
+  }
+  const data = pageCrns
+    .map((crn) => rawByCrn.get(crn))
+    .filter((j): j is string => j != null)
+    .map((raw_json) => rowToCourseSection({ raw_json }));
+
+  return {
+    success: true,
+    totalCount,
+    data,
+    pageOffset: params.pageOffset,
+    pageMaxSize: params.pageMaxSize,
+    sectionsFetchedCount: data.length,
     pathMode: "search",
   };
 }
