@@ -9,7 +9,7 @@
     "preview": "wrangler dev",
     "deploy": "astro build && wrangler deploy",
     "cf-typegen": "wrangler types",
-    "db:snapshot": "wrangler d1 export uh_sis --remote --output .tmp/snapshot.sql && wrangler d1 execute uh_sis --local --file .tmp/snapshot.sql",
+    "db:snapshot": "node scripts/snapshot.mjs",
     "ingest": "tsx scripts/ingest.ts",
     "astro": "astro",
     "test": "playwright test",
