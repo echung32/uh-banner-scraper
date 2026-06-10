@@ -13,14 +13,20 @@
  * `subject` row for every subject, so it never triggers. Disabled with
  * DYNAMIC_SYNC=0 (e2e sets this so read-path tests stay deterministic).
  */
-import { establishSession } from "@/lib/sis/client";
+import { establishSession, getSubjects } from "@/lib/sis/client";
 import { fetchAllSections } from "@/lib/ingest/sync";
-import { replaceSubjectSections, upsertSubjects } from "@/lib/db/upsert";
+import {
+  markTermSubjectsSynced,
+  replaceSubjectSections,
+  upsertSubjects,
+} from "@/lib/db/upsert";
 import type { D1Like } from "@/lib/db/client";
 import { logSis } from "@/lib/log";
 
 /** Concurrent first-searches of the same (term, subject) share one live sync. */
 const inFlight = new Map<string, Promise<number>>();
+/** Concurrent first-views of a dynamic term's subject menu share one fetch. */
+const inFlightSubjects = new Map<string, Promise<number>>();
 
 function dynamicEnabled(): boolean {
   return process.env.DYNAMIC_SYNC !== "0";
@@ -50,6 +56,44 @@ async function alreadySynced(
     .bind(term, subject)
     .first<{ ok: number }>();
   return !!row;
+}
+
+/**
+ * Populates the `subject` table for a not-yet-backfilled term with the full
+ * Banner subject list (one getSubjects call). Without this the Subject menu —
+ * derived from sections, which don't exist yet — is empty, so there'd be no way
+ * to pick a subject to trigger the per-subject section sync. Backfilled terms
+ * already have their subjects (full sync enumerated them, `last_synced_at` set);
+ * `subjects_synced_at` marks that the enumeration ran so a term that returns
+ * zero subjects (an Extension variant) isn't re-hit every request. Returns the
+ * number of subjects (0 if it didn't run).
+ */
+export async function ensureTermSubjects(
+  db: D1Like,
+  term: string
+): Promise<number> {
+  if (!dynamicEnabled()) return 0;
+  const row = await db
+    .prepare("SELECT last_synced_at, subjects_synced_at FROM term WHERE code = ?")
+    .bind(term)
+    .first<{ last_synced_at: number | null; subjects_synced_at: number | null }>();
+  // Unknown term, already backfilled, or already enumerated → nothing to do.
+  if (!row || row.last_synced_at != null || row.subjects_synced_at != null) return 0;
+
+  const existing = inFlightSubjects.get(term);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    logSis(`dynamic subjects ${term} — live Banner (term not backfilled)`);
+    const session = await establishSession(term);
+    const subjects = await getSubjects(session, term);
+    await upsertSubjects(db, term, subjects);
+    await markTermSubjectsSynced(db, term, Date.now());
+    logSis(`dynamic subjects ${term} → ${subjects.length} subjects`);
+    return subjects.length;
+  })().finally(() => inFlightSubjects.delete(term));
+  inFlightSubjects.set(term, promise);
+  return promise;
 }
 
 async function doSync(

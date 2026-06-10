@@ -5,7 +5,9 @@
  * D1's filter_option table. Returns [{ code, description }].
  */
 import type { APIRoute } from "astro";
+import { getDb } from "@/lib/db/client";
 import { fetchFilterOptions } from "@/lib/search";
+import { ensureTermSubjects } from "@/lib/ingest/dynamicSync";
 import { FILTER_KINDS, type FilterKind } from "@/lib/db/queries";
 
 function bad(message: string, status = 400): Response {
@@ -28,6 +30,11 @@ export const GET: APIRoute = async ({ request }) => {
   }
 
   try {
+    // For a not-yet-backfilled term the subject menu (derived from sections)
+    // would be empty — lazily enumerate its subjects from Banner so the dropdown
+    // is usable (a no-op for backfilled terms / when DYNAMIC_SYNC=0).
+    if (kind === "subject") await ensureTermSubjects(getDb(), term);
+
     const options = await fetchFilterOptions(term, kind as FilterKind, campus);
     return new Response(JSON.stringify({ kind, options }), {
       status: 200,

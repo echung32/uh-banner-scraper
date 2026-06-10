@@ -65,9 +65,12 @@ export const FILTER_KINDS = [
 export type FilterKind = (typeof FILTER_KINDS)[number];
 
 /**
- * Subject menu for a term — derived from the sections actually present
- * (`course_section`), so it only lists subjects that have data. `code` is the
- * subject code the search filters on; `description` is Banner's subject name.
+ * Subject menu for a term — the union of subjects with sections present
+ * (`course_section`) and the enumerated `subject` table. The union matters for
+ * not-yet-backfilled terms: their sections are filled lazily per subject, so the
+ * menu would be empty until the `subject` table is populated (see
+ * dynamicSync.ensureTermSubjects). `code` is the subject code the search filters
+ * on; `description` is Banner's subject name.
  */
 export async function getSubjectFacet(
   db: D1Like,
@@ -75,11 +78,14 @@ export async function getSubjectFacet(
 ): Promise<AutocompleteItem[]> {
   const { results } = await db
     .prepare(
-      `SELECT subject AS code, MAX(subject_description) AS description
-         FROM course_section WHERE term = ?
-         GROUP BY subject ORDER BY subject ASC`
+      `SELECT code, MAX(description) AS description FROM (
+         SELECT subject AS code, subject_description AS description
+           FROM course_section WHERE term = ?
+         UNION ALL
+         SELECT code, description FROM subject WHERE term = ?
+       ) GROUP BY code ORDER BY code ASC`
     )
-    .bind(term)
+    .bind(term, term)
     .all<{ code: string; description: string }>();
   return results.map((r) => ({ code: r.code, description: r.description }));
 }

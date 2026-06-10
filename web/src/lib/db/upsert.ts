@@ -467,6 +467,11 @@ export async function markSeatRefresh(db: D1Like, term: string, at: number): Pro
   await db.prepare("UPDATE term SET last_seat_refresh_at = ? WHERE code = ?").bind(at, term).run();
 }
 
+/** Records that a term's subjects have been enumerated (lazy subject path). */
+export async function markTermSubjectsSynced(db: D1Like, term: string, at: number): Promise<void> {
+  await db.prepare("UPDATE term SET subjects_synced_at = ? WHERE code = ?").bind(at, term).run();
+}
+
 export interface SyncRunHandle {
   id: number;
 }
