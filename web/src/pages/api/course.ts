@@ -7,7 +7,7 @@
  * different catalog entry. Returns 404 if not ingested.
  */
 import type { APIRoute } from "astro";
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import { fetchCourseCatalog } from "@/lib/search";
 import { ensureCourseText } from "@/lib/ingest/courseTextLazy";
 import { logDb } from "@/lib/log";

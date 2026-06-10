@@ -4,7 +4,7 @@
  */
 import type { AutocompleteItem, CourseSection } from "@/lib/sis/types";
 import type { CatalogDetails } from "@/lib/sis/parse/catalogDetails";
-import type { D1Like, D1PreparedStatement } from "./client";
+import type { D1Like, D1PreparedStatement } from "./types";
 import {
   isViewOnly,
   sectionToFacultyRows,

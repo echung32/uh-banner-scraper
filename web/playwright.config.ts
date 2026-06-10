@@ -17,10 +17,14 @@ const ADMIN_SECRET = "e2e-admin-secret";
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
-  fullyParallel: true,
+  // Single worker: the app is served by one `wrangler dev` (miniflare) instance,
+  // which throttles under many concurrent page loads and races island hydration
+  // against the test's first click. Serial execution keeps it deterministic (the
+  // old standalone-node server tolerated full parallelism; miniflare does not).
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: "html",
   globalSetup: "./e2e/global-setup.ts",
   use: {
@@ -54,27 +58,24 @@ export default defineConfig({
       stdout: "pipe",
     },
     {
-      // Use the production build (preview) rather than dev so the Astro dev
-      // toolbar / serialized island debug output don't pollute the DOM.
-      command: `yarn build && yarn preview`,
+      // Run the built Worker under wrangler dev (local D1 binding) — the same
+      // artifact that deploys. Config reaches the Worker via `--var` (wrangler
+      // populates process.env from vars); Playwright's `env:` would only set the
+      // parent process and never reach the worker runtime. Vars:
+      //   SIS_BASE_URL      → the mock SIS, never the live UH host.
+      //   DYNAMIC_SYNC=1    → ingestion spec exercises the page cache (term 202740).
+      //   COURSE_TEXT_LAZY=0→ seeded course rows have NULL descriptions; keep the
+      //                       course panel off the SIS.
+      //   INGEST_ON_WORKER=1→ enable the admin ingestion routes for the ingest
+      //                       spec (tiny mock catalog — no real CPU pressure;
+      //                       production leaves this unset, so those routes 501).
+      command:
+        `yarn build && yarn wrangler dev --ip 127.0.0.1 --port ${APP_PORT}` +
+        ` --var SIS_BASE_URL:${SIS_BASE_URL}` +
+        ` --var DYNAMIC_SYNC:1 --var COURSE_TEXT_LAZY:0 --var LOG_SOURCE:0` +
+        ` --var INGEST_ON_WORKER:1 --var ADMIN_SECRET:${ADMIN_SECRET}`,
       url: `http://127.0.0.1:${APP_PORT}`,
       reuseExistingServer: !process.env.CI,
-      env: {
-        SIS_BASE_URL,
-        HOST: "127.0.0.1",
-        PORT: String(APP_PORT),
-        // Read path serves from the seeded local D1; ingestion writes to it.
-        D1_MODE: "local",
-        // The seeded read-path terms are marked backfilled (last_synced_at set in
-        // global-setup), so their searches serve from D1 via the SQL path, never
-        // the live page cache. DYNAMIC_SYNC is on so the ingestion spec can
-        // exercise the demand-driven page cache against the dynamic term (202740).
-        DYNAMIC_SYNC: "1",
-        // Likewise keep the course panel off the SIS — the seeded course rows
-        // have a NULL description, which would otherwise trigger lazy text fetch.
-        COURSE_TEXT_LAZY: "0",
-        ADMIN_SECRET,
-      },
       stdout: "pipe",
       timeout: 180_000,
     },

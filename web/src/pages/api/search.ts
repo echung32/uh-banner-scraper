@@ -1,5 +1,5 @@
 import type { APIRoute } from "astro";
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import {
   fetchBackfillCoverageSummary,
   fetchCoverageSummary,

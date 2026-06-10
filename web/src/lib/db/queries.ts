@@ -9,7 +9,7 @@ import type {
   SearchParams,
   SearchResultsResponse,
 } from "@/lib/sis/types";
-import type { D1Like } from "./client";
+import type { D1Like } from "./types";
 import { campusDescriptionForCode } from "@/lib/campuses";
 import { rowToCourseSection } from "./mappers";
 

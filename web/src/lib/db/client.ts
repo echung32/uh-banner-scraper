@@ -1,43 +1,25 @@
 /**
- * D1 access layer.
+ * Node-side D1 access layer (the ingestion CLI; never bundled into the Worker).
  *
- * The query code in this directory targets a narrow `D1Like` interface that
- * mirrors the subset of Cloudflare's native `D1Database` binding we use. Two
- * backends implement it:
+ * The query/ingest code targets the narrow `D1Like` interface in `./types`. Two
+ * backends implement it here:
  *
- *   - `remoteD1`      — the D1 REST API (shared, durable). Used by a deployed
- *                       Node host where no native binding exists.
- *   - `localSqliteD1` — Node 24's built-in `node:sqlite` over the wrangler
- *                       local D1 file (`.wrangler/state`). Used in dev + e2e so
- *                       tests run against a fast, deterministic local store that
- *                       `wrangler d1 execute --local` can seed.
+ *   - `remoteD1`      — the D1 REST API (shared, durable). The production
+ *                       ingestion CLI uses this to write to the same D1 the
+ *                       Worker reads via its native binding.
+ *   - `localSqliteD1` — Node's built-in `node:sqlite` over the wrangler local D1
+ *                       file (`.wrangler/state`). Used by local/e2e ingestion.
  *
- * On the eventual move to Cloudflare Workers (docs/plans/workers-migration.md)
- * the native `env.DB` binding satisfies `D1Like` directly, so only `getDb()`'s
- * construction changes — the queries stay identical.
+ * The Worker read path does NOT import this module — it reads `env.DB` via
+ * `./binding`. Keeping `node:sqlite` out of the Worker bundle is why the binding
+ * accessor lives in a separate file.
  */
 import { DatabaseSync } from "node:sqlite";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
+import type { D1Like, D1PreparedStatement, D1Result } from "./types";
 
-export interface D1Result<T = Record<string, unknown>> {
-  results: T[];
-  success: boolean;
-  meta: Record<string, unknown>;
-}
-
-export interface D1PreparedStatement {
-  bind(...values: unknown[]): D1PreparedStatement;
-  first<T = Record<string, unknown>>(colName?: string): Promise<T | null>;
-  all<T = Record<string, unknown>>(): Promise<D1Result<T>>;
-  run(): Promise<D1Result>;
-}
-
-export interface D1Like {
-  prepare(query: string): D1PreparedStatement;
-  /** Runs the statements; atomic where the backend supports it. */
-  batch(statements: D1PreparedStatement[]): Promise<D1Result[]>;
-}
+export type { D1Like, D1PreparedStatement, D1Result } from "./types";
 
 const EMPTY_META: Record<string, unknown> = {};
 
@@ -233,9 +215,10 @@ export function localSqliteD1(filePath?: string): D1Like {
 let cached: D1Like | null = null;
 
 /**
- * Returns the process-wide D1 client. `D1_MODE=local` (default outside
- * production) uses the wrangler local file; otherwise the remote REST API is
- * used, requiring CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID, CLOUDFLARE_API_TOKEN.
+ * Returns the process-wide D1 client for the Node ingestion CLI. `D1_MODE=local`
+ * (default outside production) uses the wrangler local file; `D1_MODE=remote`
+ * uses the REST API, requiring CLOUDFLARE_ACCOUNT_ID, D1_DATABASE_ID,
+ * CLOUDFLARE_API_TOKEN. The Worker read path uses `getDb` from `./binding`.
  */
 export function getDb(): D1Like {
   if (cached) return cached;

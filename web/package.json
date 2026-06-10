@@ -6,13 +6,17 @@
   "scripts": {
     "dev": "astro dev --host",
     "build": "astro build",
-    "preview": "astro preview",
+    "preview": "wrangler dev",
+    "deploy": "astro build && wrangler deploy",
+    "cf-typegen": "wrangler types",
+    "db:snapshot": "wrangler d1 export uh_sis --remote --output .tmp/snapshot.sql && wrangler d1 execute uh_sis --local --file .tmp/snapshot.sql",
+    "ingest": "tsx scripts/ingest.ts",
     "astro": "astro",
     "test": "playwright test",
     "test:ui": "playwright test --ui"
   },
   "dependencies": {
-    "@astrojs/node": "^10.1.3",
+    "@astrojs/cloudflare": "^13.6.1",
     "@astrojs/react": "^5.0.7",
     "@radix-ui/react-dialog": "^1.1.16",
     "@radix-ui/react-icons": "^1.3.2",
@@ -35,10 +39,12 @@
   },
   "devDependencies": {
     "@astrojs/check": "^0.9.9",
+    "@cloudflare/workers-types": "^4.20260609.1",
     "@playwright/test": "^1.60.0",
     "@types/node": "^25.9.2",
     "@types/react": "^19.1.5",
     "@types/react-dom": "^19.1.5",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
     "vite": "^7.3.2",
     "wrangler": "^4.98.0"

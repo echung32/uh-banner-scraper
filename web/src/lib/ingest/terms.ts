@@ -5,7 +5,7 @@
  */
 import { establishSession, getTerms } from "@/lib/sis/client";
 import type { AutocompleteItem } from "@/lib/sis/types";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import { upsertTerms } from "@/lib/db/upsert";
 
 // A known-recent term used only to bootstrap the handshake; the term list it

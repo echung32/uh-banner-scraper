@@ -13,13 +13,15 @@
  * Callers must send `Content-Type: application/json` (Astro CSRF; see sync.ts).
  */
 import type { APIRoute } from "astro";
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import { refreshSeats } from "@/lib/ingest/seatRefresh";
-import { checkAdmin, json } from "@/lib/ingest/auth";
+import { checkAdmin, ingestDisabledOnWorker, json } from "@/lib/ingest/auth";
 
 const COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
 
 export const POST: APIRoute = async ({ request }) => {
+  const off = ingestDisabledOnWorker();
+  if (off) return off;
   const denied = checkAdmin(request);
   if (denied) return denied;
 

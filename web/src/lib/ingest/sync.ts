@@ -11,7 +11,7 @@ import {
   searchCourses,
 } from "@/lib/sis/client";
 import type { CourseSection, SisSession } from "@/lib/sis/types";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import {
   finishSyncRun,
   markTermSynced,

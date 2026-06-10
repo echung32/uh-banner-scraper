@@ -22,7 +22,7 @@ import {
   filterSignature,
   getTermSyncMeta,
 } from "@/lib/db/queries";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import type { SearchParams, SisSession } from "@/lib/sis/types";
 import { logSis } from "@/lib/log";
 

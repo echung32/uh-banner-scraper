@@ -14,7 +14,7 @@
  */
 import { establishSession, getSubjects } from "@/lib/sis/client";
 import { markTermSubjectsSynced, upsertSubjects } from "@/lib/db/upsert";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import { logSis } from "@/lib/log";
 
 /** Concurrent first-views of a dynamic term's subject menu share one fetch. */

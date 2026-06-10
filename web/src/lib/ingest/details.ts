@@ -39,7 +39,7 @@ import {
   parseSyllabus,
 } from "@/lib/sis/parse/sectionDetail";
 import type { SisSession } from "@/lib/sis/types";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import {
   finishSyncRun,
   replaceFilterOptions,

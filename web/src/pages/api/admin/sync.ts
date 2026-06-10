@@ -15,12 +15,14 @@
  *     -H 'x-admin-secret: $ADMIN_SECRET' -H 'content-type: application/json'
  */
 import type { APIRoute } from "astro";
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import { refreshTerms } from "@/lib/ingest/terms";
 import { syncTerm, type SyncResult } from "@/lib/ingest/sync";
-import { checkAdmin, json } from "@/lib/ingest/auth";
+import { checkAdmin, ingestDisabledOnWorker, json } from "@/lib/ingest/auth";
 
 export const POST: APIRoute = async ({ request }) => {
+  const off = ingestDisabledOnWorker();
+  if (off) return off;
   const denied = checkAdmin(request);
   if (denied) return denied;
 

@@ -1,11 +1,19 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "uh-sis-web",
+  // Must match the GitHub-connected Workers service so Workers Builds deploys to
+  // it (dash: workers/services/view/uh-course-search).
+  "name": "uh-course-search",
+  // The @astrojs/cloudflare v13 adapter owns the Worker entry + assets via
+  // @cloudflare/vite-plugin; point main at its unified entrypoint.
+  "main": "@astrojs/cloudflare/entrypoints/server",
   "compatibility_date": "2026-06-01",
-  "compatibility_flags": ["nodejs_compat"],
-  // D1 is used now via the HTTP-API shim (lib/db/client.ts) on the Node host, and
-  // by `wrangler d1` tooling for migrations. It becomes the native deploy binding
-  // in the Workers migration (docs/plans/workers-migration.md).
+  // nodejs_compat_populate_process_env makes Worker vars/secrets readable via
+  // `process.env.*` (the app relies on this — see astro.config.mjs).
+  "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
+  "observability": { "enabled": true },
+  // Native D1 binding for the read path (replaces the HTTP-API shim, which now
+  // serves only the Node ingestion CLI). `migrations_dir` keeps `wrangler d1
+  // migrations apply` working.
   "d1_databases": [
     {
       "binding": "DB",
@@ -13,5 +21,17 @@
       "database_id": "04eae271-3025-48b5-8152-8fcaa9b5bbdc",
       "migrations_dir": "./migrations"
     }
-  ]
+  ],
+  // Runtime config readable via process.env (see compat flag above). SIS_BASE_URL
+  // is the live Banner host (only the lazy cache-on-miss paths call it). Feature
+  // flags default on; LOG_SOURCE off in prod. ADMIN_SECRET is a *secret*
+  // (`wrangler secret put ADMIN_SECRET`). INGEST_ON_WORKER is intentionally unset
+  // → admin ingestion routes return 501 in production (ingestion is Node-only).
+  "vars": {
+    "SIS_BASE_URL": "https://www.sis.hawaii.edu:9234/StudentRegistrationSsb",
+    "DYNAMIC_SYNC": "1",
+    "SECTION_LAZY_FETCH": "1",
+    "COURSE_TEXT_LAZY": "1",
+    "LOG_SOURCE": "0"
+  }
 }

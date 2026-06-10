@@ -7,7 +7,7 @@
  * lib/ingest/sectionLazy). 404 only if the section itself doesn't exist in D1.
  */
 import type { APIRoute } from "astro";
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import { fetchSectionDetail } from "@/lib/search";
 import { ensureSectionDetail } from "@/lib/ingest/sectionLazy";
 import { logDb } from "@/lib/log";

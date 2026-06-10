@@ -7,7 +7,7 @@
  */
 import { establishSession, getEnrollmentInfo } from "@/lib/sis/client";
 import type { CourseSection } from "@/lib/sis/types";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import { rowToCourseSection } from "@/lib/db/mappers";
 import {
   finishSyncRun,

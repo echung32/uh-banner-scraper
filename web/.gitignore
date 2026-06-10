@@ -34,3 +34,7 @@ yarn-error.log*
 
 # Cloudflare
 .wrangler
+.dev.vars
+.tmp/
+# wrangler types output
+worker-configuration.d.ts

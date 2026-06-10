@@ -24,7 +24,7 @@ import {
   parseSectionCrns,
   parseSyllabus,
 } from "@/lib/sis/parse/sectionDetail";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import type { SectionDetail } from "@/lib/db/queries";
 import { upsertSectionDetail } from "@/lib/db/upsert";
 import { logSis } from "@/lib/log";

@@ -24,7 +24,7 @@ import {
   parseCourseDescription,
   parsePrerequisites,
 } from "@/lib/sis/parse/text";
-import type { D1Like } from "@/lib/db/client";
+import type { D1Like } from "@/lib/db/types";
 import { getCourseCatalog, type CourseCatalog } from "@/lib/db/queries";
 import { updateCourseText } from "@/lib/db/upsert";
 import { logSis } from "@/lib/log";

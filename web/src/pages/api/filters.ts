@@ -5,7 +5,7 @@
  * D1's filter_option table. Returns [{ code, description }].
  */
 import type { APIRoute } from "astro";
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import { fetchFilterOptions } from "@/lib/search";
 import { ensureTermSubjects } from "@/lib/ingest/dynamicSync";
 import { FILTER_KINDS, type FilterKind } from "@/lib/db/queries";

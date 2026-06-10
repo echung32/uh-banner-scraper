@@ -4,7 +4,7 @@
  * only touched by the ingestion / refresh jobs in lib/ingest. There is no
  * request-time cache or session pool anymore — D1 is the source of truth.
  */
-import { getDb } from "@/lib/db/client";
+import { getDb } from "@/lib/db/binding";
 import {
   getBackfillCoverageDetail,
   getBackfillCoverageSummary,
