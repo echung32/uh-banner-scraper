@@ -23,7 +23,7 @@ function findLocalD1File(): string {
   );
   if (!file) {
     throw new Error(
-      `No local D1 file in ${dir}. Run: yarn wrangler d1 migrations apply uh_sis --local`
+      `No local D1 file in ${dir}. Run: yarn wrangler d1 migrations apply uh-course-search-db --local`
     );
   }
   return join(dir, file);
@@ -108,7 +108,7 @@ SECTIONS[0].faculty = [
 
 export default function globalSetup() {
   // Ensure the local D1 file exists with the current schema (idempotent).
-  execSync("yarn wrangler d1 migrations apply uh_sis --local", {
+  execSync("yarn wrangler d1 migrations apply uh-course-search-db --local", {
     stdio: "ignore",
   });
 
