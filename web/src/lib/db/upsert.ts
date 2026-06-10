@@ -289,12 +289,14 @@ export interface SectionDetailUpsert {
   linkedCrns: string[] | null;
   bookstore: unknown | null;
   syllabus: string | null;
-  rawRestrictionsHtml: string;
-  rawFeesHtml: string;
-  rawXlstHtml: string;
-  rawLinkedHtml: string;
-  rawBookstoreHtml: string;
-  rawSyllabusHtml: string;
+  // Null when that fragment's live fetch failed (lazy path tolerates a single
+  // bad/unrecognized endpoint); the column is nullable.
+  rawRestrictionsHtml: string | null;
+  rawFeesHtml: string | null;
+  rawXlstHtml: string | null;
+  rawLinkedHtml: string | null;
+  rawBookstoreHtml: string | null;
+  rawSyllabusHtml: string | null;
 }
 
 const jsonOrNull = (v: unknown): string | null =>

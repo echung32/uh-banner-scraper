@@ -56,7 +56,14 @@ async function fetchAndStore(
   crn: string
 ): Promise<SectionDetail | null> {
   const session = await establishSession(term);
-  const [restr, fees, xlst, linked, bookstore, syllabus] = await Promise.all([
+  // Per-fragment tolerance: Banner returns 500 for a CRN it doesn't recognize
+  // (e.g. a section that has since been cancelled), and any one fragment may
+  // fail transiently. `allSettled` keeps a single bad endpoint from sinking the
+  // whole panel. If EVERY fragment fails the section is unknown to Banner (or
+  // the session/IP is throttled), so we return null WITHOUT caching — the route
+  // 404s ("no detail") instead of 500ing, and a later view retries live rather
+  // than being stuck with a cached all-null row (the lazy path never refetches).
+  const settled = await Promise.allSettled([
     getRestrictions(session, term, crn),
     getFees(session, term, crn),
     getCrossListSections(session, term, crn),
@@ -64,13 +71,29 @@ async function fetchAndStore(
     getBookstore(session, term, crn),
     getSyllabus(session, term, crn),
   ]);
+  if (settled.every((s) => s.status === "rejected")) {
+    console.warn(
+      `Section detail: all fragments failed for ${term}:${crn} (unknown CRN or throttled) — not caching`
+    );
+    return null;
+  }
+  const raw = (i: number): string | null =>
+    settled[i].status === "fulfilled"
+      ? (settled[i] as PromiseFulfilledResult<string>).value
+      : null;
+  const restr = raw(0);
+  const fees = raw(1);
+  const xlst = raw(2);
+  const linked = raw(3);
+  const bookstore = raw(4);
+  const syllabus = raw(5);
 
-  const restrictions = parseRestrictions(restr);
-  const parsedFees = parseFees(fees);
-  const crossListCrns = parseSectionCrns(xlst);
-  const linkedCrns = parseSectionCrns(linked);
-  const parsedBookstore = parseBookstore(bookstore);
-  const parsedSyllabus = parseSyllabus(syllabus);
+  const restrictions = restr ? parseRestrictions(restr) : null;
+  const parsedFees = fees ? parseFees(fees) : null;
+  const crossListCrns = xlst ? parseSectionCrns(xlst) : null;
+  const linkedCrns = linked ? parseSectionCrns(linked) : null;
+  const parsedBookstore = bookstore ? parseBookstore(bookstore) : null;
+  const parsedSyllabus = syllabus ? parseSyllabus(syllabus) : null;
 
   await upsertSectionDetail(
     db,
