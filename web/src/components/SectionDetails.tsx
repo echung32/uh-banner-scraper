@@ -23,16 +23,11 @@ interface Fee {
   description: string;
   amount: string;
 }
-interface BookstoreLink {
-  label: string;
-  url: string;
-}
 interface SectionDetail {
   restrictions: RestrictionRule[] | null;
   fees: Fee[] | null;
   crossListCrns: string[] | null;
   linkedCrns: string[] | null;
-  bookstore: BookstoreLink[] | null;
   syllabus: string | null;
 }
 // Instructor name + email come straight from the section's faculty[] (always
@@ -116,7 +111,6 @@ export function SectionDetails({ section }: { section: CourseSection }) {
       detail.fees?.length ||
       detail.crossListCrns?.length ||
       detail.linkedCrns?.length ||
-      detail.bookstore?.length ||
       detail.syllabus);
 
   return (
@@ -243,26 +237,6 @@ export function SectionDetails({ section }: { section: CourseSection }) {
         ) : null}
         {detail?.linkedCrns?.length ? (
           <Section title="Linked CRNs">{detail.linkedCrns.join(", ")}</Section>
-        ) : null}
-
-        {detail?.bookstore?.length ? (
-          <Section title="Bookstore">
-            <ul className="space-y-1">
-              {detail.bookstore.map((b, idx) => (
-                <li key={idx}>
-                  <a
-                    href={b.url}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="inline-flex items-center gap-1 text-blue-600 hover:underline dark:text-blue-400"
-                  >
-                    {b.label || b.url}
-                    <ExternalLink className="h-3 w-3" />
-                  </a>
-                </li>
-              ))}
-            </ul>
-          </Section>
         ) : null}
 
         {detail?.syllabus ? (

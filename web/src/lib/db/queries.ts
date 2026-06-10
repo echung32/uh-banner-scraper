@@ -218,7 +218,6 @@ export interface SectionDetail {
   fees: unknown | null;
   crossListCrns: string[] | null;
   linkedCrns: string[] | null;
-  bookstore: unknown | null;
   syllabus: string | null;
 }
 
@@ -231,7 +230,7 @@ export async function getSectionDetail(
   const row = await db
     .prepare(
       `SELECT restrictions_json, fees_json, cross_list_crns, linked_crns,
-              bookstore_json, syllabus_text
+              syllabus_text
          FROM section_detail WHERE term = ? AND crn = ?`
     )
     .bind(term, crn)
@@ -240,7 +239,6 @@ export async function getSectionDetail(
       fees_json: string | null;
       cross_list_crns: string | null;
       linked_crns: string | null;
-      bookstore_json: string | null;
       syllabus_text: string | null;
     }>();
   if (!row) return null;
@@ -253,7 +251,6 @@ export async function getSectionDetail(
     fees: j(row.fees_json),
     crossListCrns: j(row.cross_list_crns) as string[] | null,
     linkedCrns: j(row.linked_crns) as string[] | null,
-    bookstore: j(row.bookstore_json),
     syllabus: row.syllabus_text,
   };
 }

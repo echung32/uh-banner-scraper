@@ -12,7 +12,6 @@
  */
 import {
   establishSession,
-  getBookstore,
   getCrossListSections,
   getFees,
   getLinkedSections,
@@ -20,7 +19,6 @@ import {
   getSyllabus,
 } from "@/lib/sis/client";
 import {
-  parseBookstore,
   parseFees,
   parseRestrictions,
   parseSectionCrns,
@@ -70,7 +68,6 @@ async function fetchAndStore(
     getFees(session, term, crn),
     getCrossListSections(session, term, crn),
     getLinkedSections(session, term, crn),
-    getBookstore(session, term, crn),
     getSyllabus(session, term, crn),
   ]);
   if (settled.every((s) => s.status === "rejected")) {
@@ -87,14 +84,12 @@ async function fetchAndStore(
   const fees = raw(1);
   const xlst = raw(2);
   const linked = raw(3);
-  const bookstore = raw(4);
-  const syllabus = raw(5);
+  const syllabus = raw(4);
 
   const restrictions = restr ? parseRestrictions(restr) : null;
   const parsedFees = fees ? parseFees(fees) : null;
   const crossListCrns = xlst ? parseSectionCrns(xlst) : null;
   const linkedCrns = linked ? parseSectionCrns(linked) : null;
-  const parsedBookstore = bookstore ? parseBookstore(bookstore) : null;
   const parsedSyllabus = syllabus ? parseSyllabus(syllabus) : null;
 
   await upsertSectionDetail(
@@ -106,13 +101,11 @@ async function fetchAndStore(
       fees: parsedFees,
       crossListCrns,
       linkedCrns,
-      bookstore: parsedBookstore,
       syllabus: parsedSyllabus,
       rawRestrictionsHtml: restr,
       rawFeesHtml: fees,
       rawXlstHtml: xlst,
       rawLinkedHtml: linked,
-      rawBookstoreHtml: bookstore,
       rawSyllabusHtml: syllabus,
     },
     Date.now()
@@ -125,7 +118,6 @@ async function fetchAndStore(
     fees: parsedFees,
     crossListCrns,
     linkedCrns,
-    bookstore: parsedBookstore,
     syllabus: parsedSyllabus,
   };
 }

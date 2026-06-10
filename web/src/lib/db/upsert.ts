@@ -287,7 +287,6 @@ export interface SectionDetailUpsert {
   fees: unknown | null;
   crossListCrns: string[] | null;
   linkedCrns: string[] | null;
-  bookstore: unknown | null;
   syllabus: string | null;
   // Null when that fragment's live fetch failed (lazy path tolerates a single
   // bad/unrecognized endpoint); the column is nullable.
@@ -295,7 +294,6 @@ export interface SectionDetailUpsert {
   rawFeesHtml: string | null;
   rawXlstHtml: string | null;
   rawLinkedHtml: string | null;
-  rawBookstoreHtml: string | null;
   rawSyllabusHtml: string | null;
 }
 
@@ -314,22 +312,20 @@ export async function upsertSectionDetail(
     .prepare(
       `INSERT INTO section_detail
          (term, crn, restrictions_json, fees_json, cross_list_crns, linked_crns,
-          bookstore_json, syllabus_text, raw_restrictions_html, raw_fees_html,
-          raw_xlst_html, raw_linked_html, raw_bookstore_html, raw_syllabus_html,
+          syllabus_text, raw_restrictions_html, raw_fees_html,
+          raw_xlst_html, raw_linked_html, raw_syllabus_html,
           synced_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(term, crn) DO UPDATE SET
          restrictions_json = excluded.restrictions_json,
          fees_json = excluded.fees_json,
          cross_list_crns = excluded.cross_list_crns,
          linked_crns = excluded.linked_crns,
-         bookstore_json = excluded.bookstore_json,
          syllabus_text = excluded.syllabus_text,
          raw_restrictions_html = excluded.raw_restrictions_html,
          raw_fees_html = excluded.raw_fees_html,
          raw_xlst_html = excluded.raw_xlst_html,
          raw_linked_html = excluded.raw_linked_html,
-         raw_bookstore_html = excluded.raw_bookstore_html,
          raw_syllabus_html = excluded.raw_syllabus_html,
          synced_at = excluded.synced_at`
     )
@@ -340,13 +336,11 @@ export async function upsertSectionDetail(
       jsonOrNull(d.fees),
       jsonOrNull(d.crossListCrns),
       jsonOrNull(d.linkedCrns),
-      jsonOrNull(d.bookstore),
       d.syllabus,
       d.rawRestrictionsHtml,
       d.rawFeesHtml,
       d.rawXlstHtml,
       d.rawLinkedHtml,
-      d.rawBookstoreHtml,
       d.rawSyllabusHtml,
       syncedAt
     )

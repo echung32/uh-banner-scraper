@@ -13,7 +13,6 @@
  */
 import {
   establishSession,
-  getBookstore,
   getCatalogDetails,
   getContactCard,
   getCorequisites,
@@ -34,7 +33,6 @@ import {
   parsePrerequisites,
 } from "@/lib/sis/parse/text";
 import {
-  parseBookstore,
   parseFees,
   parseRestrictions,
   parseSectionCrns,
@@ -224,8 +222,8 @@ async function syncCourseCatalog(
 }
 
 /**
- * Per-CRN section-detail pass — the heaviest (6 endpoints × every CRN). Fetches
- * restrictions / fees / cross-list / linked / bookstore / syllabus, parses, and
+ * Per-CRN section-detail pass — the heaviest (5 endpoints × every CRN). Fetches
+ * restrictions / fees / cross-list / linked / syllabus, parses, and
  * upserts `section_detail`.
  */
 async function syncSectionDetails(
@@ -249,12 +247,11 @@ async function syncSectionDetails(
     if (rotated !== session) { session = rotated; since = 0; }
     since += 1;
     try {
-      const [restr, fees, xlst, linked, bookstore, syllabus] = await Promise.all([
+      const [restr, fees, xlst, linked, syllabus] = await Promise.all([
         getRestrictions(session, term, s.crn),
         getFees(session, term, s.crn),
         getCrossListSections(session, term, s.crn),
         getLinkedSections(session, term, s.crn),
-        getBookstore(session, term, s.crn),
         getSyllabus(session, term, s.crn),
       ]);
       await upsertSectionDetail(
@@ -266,13 +263,11 @@ async function syncSectionDetails(
           fees: parseFees(fees),
           crossListCrns: parseSectionCrns(xlst),
           linkedCrns: parseSectionCrns(linked),
-          bookstore: parseBookstore(bookstore),
           syllabus: parseSyllabus(syllabus),
           rawRestrictionsHtml: restr,
           rawFeesHtml: fees,
           rawXlstHtml: xlst,
           rawLinkedHtml: linked,
-          rawBookstoreHtml: bookstore,
           rawSyllabusHtml: syllabus,
         },
         Date.now()

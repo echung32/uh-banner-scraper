@@ -1,7 +1,7 @@
 /**
  * GET /api/section?term=<code>&crn=<crn>
  *
- * Section-level detail (restrictions, fees, cross-list / linked CRNs, bookstore,
+ * Section-level detail (restrictions, fees, cross-list / linked CRNs,
  * syllabus). Served from D1's section_detail table; on a miss it is fetched live
  * from Banner once, stored, and returned (lazy cache-on-miss — see
  * lib/ingest/sectionLazy). 404 only if the section itself doesn't exist in D1.

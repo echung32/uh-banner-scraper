@@ -446,14 +446,6 @@ export function getLinkedSections(
   return postSectionFragment(session, term, crn, "getLinkedSections");
 }
 
-/** Bookstore links HTML fragment. */
-export function getBookstore(
-  session: SisSession,
-  term: string,
-  crn: string
-): Promise<string> {
-  return postSectionFragment(session, term, crn, "getSectionBookstoreDetails");
-}
 
 /** Syllabus HTML fragment. */
 export function getSyllabus(

@@ -1,9 +1,8 @@
 /**
  * Parsers for the section-level detail fragments: getRestrictions, getFees,
- * getXlstSections (cross-list), getLinkedSections, getSectionBookstoreDetails,
- * getSyllabus. Each returns structured data (or null when Banner shows a
- * "No … information available" placeholder). Samples in
- * scripts/intercepted_calls.json.
+ * getXlstSections (cross-list), getLinkedSections, getSyllabus. Each returns
+ * structured data (or null when Banner shows a "No … information available"
+ * placeholder). Samples in scripts/intercepted_calls.json.
  */
 
 function decodeEntities(s: string): string {
@@ -86,19 +85,6 @@ export function parseSectionCrns(html: string): string[] | null {
     if (/^\d+$/.test(v)) crns.push(v);
   }
   return crns.length ? crns : null;
-}
-
-// ── bookstore ────────────────────────────────────────────────────────────────
-export interface BookstoreLink {
-  label: string;
-  url: string;
-}
-
-export function parseBookstore(html: string): BookstoreLink[] | null {
-  const links = [
-    ...html.matchAll(/<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi),
-  ].map((a) => ({ url: a[1], label: clean(a[2]) }));
-  return links.length ? links : null;
 }
 
 // ── syllabus ─────────────────────────────────────────────────────────────────
