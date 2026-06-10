@@ -73,7 +73,7 @@ function formatMeetingTime(mt: MeetingTime): string {
 function SectionRow({ section }: { section: CourseSection }) {
   const [expanded, setExpanded] = useState(false);
   const primaryFaculty = section.faculty.find((f) => f.primaryIndicator) ?? section.faculty[0];
-  const primaryMeeting = section.meetingsFaculty[0]?.meetingTime;
+  const meetings = section.meetingsFaculty.map((mf) => mf.meetingTime).filter((mt): mt is MeetingTime => mt != null);
 
   return (
     <>
@@ -109,12 +109,28 @@ function SectionRow({ section }: { section: CourseSection }) {
         )}
       </TableCell>
       <TableCell className="whitespace-nowrap text-sm">
-        {primaryMeeting ? formatMeetingTime(primaryMeeting) : "TBA"}
+        {meetings.length === 0 ? (
+          <span>TBA</span>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            {meetings.map((mt, i) => (
+              <span key={i}>{formatMeetingTime(mt)}</span>
+            ))}
+          </div>
+        )}
       </TableCell>
       <TableCell className="text-sm">
-        {primaryMeeting?.building
-          ? `${primaryMeeting.building} ${primaryMeeting.room ?? ""}`.trim()
-          : "—"}
+        {meetings.length === 0 ? (
+          <span>—</span>
+        ) : (
+          <div className="flex flex-col gap-0.5">
+            {meetings.map((mt, i) => (
+              <span key={i}>
+                {mt.building ? `${mt.building} ${mt.room ?? ""}`.trim() : "—"}
+              </span>
+            ))}
+          </div>
+        )}
       </TableCell>
       <TableCell className="text-center text-sm">
         <span className={section.seatsAvailable > 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}>
