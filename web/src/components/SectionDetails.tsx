@@ -1,6 +1,12 @@
-import { useEffect, useState } from "react";
-import { Loader2, ExternalLink } from "lucide-react";
+import { useEffect, useState, Fragment } from "react";
+import { Loader2, ExternalLink, Code } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import type { CourseSection } from "@/lib/sis/types";
 
 // Shapes returned by the read API routes (subset we render).
@@ -46,14 +52,254 @@ async function getJson<T>(url: string): Promise<T | null> {
   }
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title,
+  children,
+  action,
+}: {
+  title: string;
+  children: React.ReactNode;
+  action?: React.ReactNode;
+}) {
   return (
     <div className="space-y-1">
-      <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        {title}
-      </h4>
+      <div className="flex items-center gap-1.5">
+        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+          {title}
+        </h4>
+        {action}
+      </div>
       <div className="text-sm">{children}</div>
     </div>
+  );
+}
+
+interface Condition {
+  course: string;
+  grade: string;
+  // Banner states this explicitly per condition: "yes" = may be taken
+  // concurrently, "no" = may not, null = not stated.
+  concurrent: "yes" | "no" | null;
+}
+
+interface ReqGroup {
+  conditions: Condition[];
+}
+
+interface PrereqBlock {
+  summary: string;
+  groups: ReqGroup[];
+  ops: ("or" | "and")[];
+}
+
+interface ParsedPrereqs {
+  label: string | null;
+  blocks: PrereqBlock[];
+}
+
+function parseGroupConditions(rawLines: string[]): Condition[] {
+  const conditions: Condition[] = [];
+  let chunk: string[] = [];
+
+  function flush() {
+    if (!chunk.length) return;
+    const courseLine = chunk.find((l) => l.startsWith("Course or Test:"));
+    const gradeMatch = chunk
+      .find((l) => l.startsWith("Minimum Grade"))
+      ?.match(/Minimum Grade of (.+)/);
+    const concLine = chunk.find((l) => /may( not)? be taken concurrently/i.test(l));
+    const concurrent: "yes" | "no" | null = concLine
+      ? /\bnot\b/i.test(concLine)
+        ? "no"
+        : "yes"
+      : null;
+    const course = courseLine
+      ? courseLine
+          .replace(/^Course or Test:\s*/, "")
+          // Normalize "Subject NNN to NNN" single-course ranges → "Subject NNN"
+          .replace(/(\d+) to \1$/, "$1")
+          .trim()
+      : chunk[0];
+    conditions.push({ course, grade: gradeMatch?.[1] ?? "", concurrent });
+    chunk = [];
+  }
+
+  for (const line of rawLines) {
+    if (line === "and") flush();
+    else chunk.push(line);
+  }
+  flush();
+  return conditions;
+}
+
+function groupKey(g: ReqGroup) {
+  return g.conditions.map((c) => `${c.course}|${c.grade}|${c.concurrent}`).join(";;");
+}
+
+function parsePrereqText(raw: string): ParsedPrereqs {
+  const lines = raw.split("\n");
+  let label: string | null = null;
+  const blocks: PrereqBlock[] = [];
+  let cur: PrereqBlock | null = null;
+  let seen = new Set<string>();
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i].trim();
+    if (line === "(") {
+      const rawGroupLines: string[] = [];
+      i++;
+      while (i < lines.length && lines[i].trim() !== ")") {
+        if (lines[i].trim()) rawGroupLines.push(lines[i].trim());
+        i++;
+      }
+      if (cur) {
+        const group: ReqGroup = { conditions: parseGroupConditions(rawGroupLines) };
+        const key = groupKey(group);
+        if (!seen.has(key)) {
+          seen.add(key);
+          cur.groups.push(group);
+        } else {
+          // Dup: remove the op that was added between the last group and this one
+          if (cur.ops.length >= cur.groups.length) cur.ops.pop();
+        }
+      }
+    } else if (line === "or" || line === "and") {
+      cur?.ops.push(line as "or" | "and");
+    } else if (/^(Prerequisites|Test Score|Corequisite):/i.test(line)) {
+      cur = {
+        summary: line.replace(/^(Prerequisites|Test Score|Corequisite):\s*/i, "").trim(),
+        groups: [],
+        ops: [],
+      };
+      blocks.push(cur);
+      seen = new Set();
+    } else if (line && !cur) {
+      label = label ?? line;
+    }
+    i++;
+  }
+
+  // Trim any trailing ops left from dedup
+  for (const block of blocks) {
+    while (block.ops.length >= block.groups.length) block.ops.pop();
+  }
+
+  return { label, blocks };
+}
+
+function GroupCard({ group }: { group: ReqGroup }) {
+  return (
+    <div className="rounded border px-2.5 py-1.5">
+      {group.conditions.map((c, i) => (
+        <Fragment key={i}>
+          {i > 0 && (
+            <div className="text-xs text-muted-foreground py-0.5">and</div>
+          )}
+          <div className="text-sm leading-snug">
+            <span>{c.course}</span>
+            {c.grade && (
+              <span className="text-muted-foreground ml-1.5">≥{c.grade}</span>
+            )}
+            {c.concurrent === "yes" && (
+              <span className="text-xs text-muted-foreground ml-1.5">(concurrent ok)</span>
+            )}
+            {c.concurrent === "no" && (
+              <span className="text-xs text-muted-foreground ml-1.5">(no concurrent)</span>
+            )}
+          </div>
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function PrereqBlockView({ block }: { block: PrereqBlock }) {
+  const { summary, groups, ops } = block;
+
+  // No parsed groups → the summary line is the only content we have. Banner's
+  // compact summary (e.g. "[ACC(200&210), orBUS624] w/C-") is redundant once we
+  // render structured cards, so drop it whenever groups exist.
+  if (groups.length === 0) {
+    return <p className="text-sm font-medium">{summary}</p>;
+  }
+
+  return (
+    <div className="space-y-1">
+      {groups.map((group, gi) => (
+        <Fragment key={gi}>
+          {gi > 0 && (
+            <div className="flex items-center gap-2 py-0.5">
+              <div className="flex-1 border-t" />
+              <span className="text-xs font-semibold uppercase text-muted-foreground">
+                {ops[gi - 1] ?? "or"}
+              </span>
+              <div className="flex-1 border-t" />
+            </div>
+          )}
+          <GroupCard group={group} />
+        </Fragment>
+      ))}
+    </div>
+  );
+}
+
+function PrereqDisplay({ text }: { text: string }) {
+  const { blocks } = parsePrereqText(text);
+
+  if (blocks.length === 0) {
+    return <p>{text}</p>;
+  }
+
+  // The label (e.g. "Area Prerequisites") is promoted to the section heading by
+  // PrereqSection, so it isn't rendered inline here.
+  return (
+    <div className="space-y-3">
+      {blocks.map((block, i) => (
+        <PrereqBlockView key={i} block={block} />
+      ))}
+    </div>
+  );
+}
+
+function PrereqSection({ title, text }: { title: string; text: string }) {
+  const [showRaw, setShowRaw] = useState(false);
+  // Promote Banner's label (almost always "Area Prerequisites") to the heading.
+  const { label } = parsePrereqText(text);
+  const heading = label ?? title;
+  const tip = showRaw ? "Show formatted" : "Show raw source";
+  return (
+    <Section
+      title={heading}
+      action={
+        <TooltipProvider delayDuration={200}>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button
+                type="button"
+                onClick={() => setShowRaw((v) => !v)}
+                aria-pressed={showRaw}
+                aria-label={tip}
+                className={`cursor-pointer rounded p-0.5 hover:text-foreground ${
+                  showRaw ? "text-foreground" : "text-muted-foreground"
+                }`}
+              >
+                <Code className="h-3.5 w-3.5" />
+              </button>
+            </TooltipTrigger>
+            <TooltipContent>{tip}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      }
+    >
+      {showRaw ? (
+        <pre className="overflow-x-auto whitespace-pre-wrap rounded border bg-muted/50 p-2 font-mono text-xs text-muted-foreground">
+          {text}
+        </pre>
+      ) : (
+        <PrereqDisplay text={text} />
+      )}
+    </Section>
   );
 }
 
@@ -126,14 +372,10 @@ export function SectionDetails({ section }: { section: CourseSection }) {
         </Section>
 
         {catalog?.prerequisites && (
-          <Section title="Prerequisites">
-            <p className="whitespace-pre-line">{catalog.prerequisites}</p>
-          </Section>
+          <PrereqSection title="Prerequisites" text={catalog.prerequisites} />
         )}
         {catalog?.corequisites && (
-          <Section title="Corequisites">
-            <p className="whitespace-pre-line">{catalog.corequisites}</p>
-          </Section>
+          <PrereqSection title="Corequisites" text={catalog.corequisites} />
         )}
 
         {(catalog?.collegeName || catalog?.department) && (
