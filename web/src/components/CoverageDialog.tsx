@@ -8,6 +8,12 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { ALL_CAMPUSES } from "@/lib/campuses";
 import { cn } from "@/lib/utils";
 import type { CoverageChunk, CoverageDetail, SearchCoverage } from "@/lib/sis/types";
@@ -75,52 +81,68 @@ function CoverageGrid({ detail }: { detail: CoverageDetail }) {
   // Backfill: every window is present and carries its own age → color by bucket.
   if (mode === "backfill") {
     return (
-      <div className="flex flex-wrap gap-1">
-        {chunks.map((c) => {
-          const { start, end } = windowRange(c, chunkSize, totalCount);
-          const oldest = c.oldestSyncedAt ?? 0;
-          const newest = c.newestSyncedAt ?? oldest;
-          const ages =
-            oldest === newest
-              ? relativeTime(oldest)
-              : `oldest ${relativeTime(oldest)}, newest ${relativeTime(newest)}`;
-          return (
-            <span
-              key={c.index}
-              title={`Sections ${start}–${end} · ${ages}`}
-              className={cn("h-3 w-3 rounded-[3px] border", bucketClass(ageBucket(oldest)))}
-            />
-          );
-        })}
-      </div>
+      <TooltipProvider delayDuration={200} disableHoverableContent>
+        <div className="flex flex-wrap gap-1">
+          {chunks.map((c) => {
+            const { start, end } = windowRange(c, chunkSize, totalCount);
+            const oldest = c.oldestSyncedAt ?? 0;
+            const newest = c.newestSyncedAt ?? oldest;
+            const ages =
+              oldest === newest
+                ? relativeTime(oldest)
+                : `oldest ${relativeTime(oldest)}, newest ${relativeTime(newest)}`;
+            return (
+              <Tooltip key={c.index}>
+                <TooltipTrigger asChild>
+                  <span
+                    className={cn(
+                      "h-3 w-3 rounded-[3px] border",
+                      bucketClass(ageBucket(oldest))
+                    )}
+                  />
+                </TooltipTrigger>
+                <TooltipContent>
+                  Sections {start}–{end} · {ages}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
+        </div>
+      </TooltipProvider>
     );
   }
 
   // Page-cache: fixed grid; filled windows are cached, gaps are not.
   const byIndex = new Map(chunks.map((c) => [c.index, c]));
   return (
-    <div className="flex flex-wrap gap-1">
-      {Array.from({ length: totalChunks }).map((_, i) => {
-        const start = i * chunkSize + 1;
-        const end = Math.min((i + 1) * chunkSize, totalCount);
-        const hit = byIndex.get(i);
-        const title = hit
-          ? `Sections ${start}–${end} · fetched ${relativeTime(hit.fetchedAt ?? 0)}`
-          : `Sections ${start}–${end} · not cached`;
-        return (
-          <span
-            key={i}
-            title={title}
-            className={cn(
-              "h-3 w-3 rounded-[3px] border",
-              hit
-                ? "border-green-700/40 bg-green-500 dark:bg-green-600"
-                : "border-border bg-muted"
-            )}
-          />
-        );
-      })}
-    </div>
+    <TooltipProvider delayDuration={200} disableHoverableContent>
+      <div className="flex flex-wrap gap-1">
+        {Array.from({ length: totalChunks }).map((_, i) => {
+          const start = i * chunkSize + 1;
+          const end = Math.min((i + 1) * chunkSize, totalCount);
+          const hit = byIndex.get(i);
+          return (
+            <Tooltip key={i}>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "h-3 w-3 rounded-[3px] border",
+                    hit
+                      ? "border-green-700/40 bg-green-500 dark:bg-green-600"
+                      : "border-border bg-muted"
+                  )}
+                />
+              </TooltipTrigger>
+              <TooltipContent>
+                {hit
+                  ? `Sections ${start}–${end} · fetched ${relativeTime(hit.fetchedAt ?? 0)}`
+                  : `Sections ${start}–${end} · not cached`}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }
 
