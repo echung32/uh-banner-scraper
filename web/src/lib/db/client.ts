@@ -59,15 +59,11 @@ interface HttpConfig {
   apiToken: string;
 }
 
-async function httpQuery(
+/** Runs one statement against the D1 REST /query endpoint. */
+async function httpExec(
   config: HttpConfig,
-  statements: RawStatement[]
-): Promise<D1Result[]> {
-  // The REST /query endpoint runs a (possibly multi-statement) SQL string with
-  // one positional params array, returning one result object per statement.
-  const sql = statements.map((s) => s.sql).join(";\n");
-  const params = statements.flatMap((s) => s.params);
-
+  statement: RawStatement
+): Promise<D1Result> {
   const res = await fetch(
     `https://api.cloudflare.com/client/v4/accounts/${config.accountId}/d1/database/${config.databaseId}/query`,
     {
@@ -76,7 +72,7 @@ async function httpQuery(
         Authorization: `Bearer ${config.apiToken}`,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ sql, params }),
+      body: JSON.stringify({ sql: statement.sql, params: statement.params }),
     }
   );
 
@@ -91,11 +87,31 @@ async function httpQuery(
     throw new Error(`D1 HTTP query failed: ${msg}`);
   }
 
-  return (json.result ?? []).map((r) => ({
-    results: (r.results ?? []) as Record<string, unknown>[],
-    success: r.success,
-    meta: (r.meta ?? EMPTY_META) as Record<string, unknown>,
-  }));
+  const r = json.result?.[0];
+  return {
+    results: (r?.results ?? []) as Record<string, unknown>[],
+    success: r?.success ?? true,
+    meta: (r?.meta ?? EMPTY_META) as Record<string, unknown>,
+  };
+}
+
+/**
+ * Runs each statement as its OWN request. The D1 REST /query endpoint rejects a
+ * multi-statement SQL string when positional params are supplied ("params with
+ * multiple statements is not supported"), so batches can't be concatenated; they
+ * run sequentially instead. This preserves statement order (DELETE-then-INSERT)
+ * but, unlike the native binding, is not atomic across a batch. That's
+ * acceptable here: the write paths are idempotent delete-and-replace / upserts,
+ * so a re-run reconciles any partial batch. Atomicity returns with the native
+ * binding in the Workers migration (docs/plans/workers-migration.md).
+ */
+async function httpQuery(
+  config: HttpConfig,
+  statements: RawStatement[]
+): Promise<D1Result[]> {
+  const out: D1Result[] = [];
+  for (const s of statements) out.push(await httpExec(config, s));
+  return out;
 }
 
 function httpStatement(

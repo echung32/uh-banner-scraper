@@ -34,6 +34,7 @@ export const POST: APIRoute = async ({ request }) => {
   const catalog = url.searchParams.get("catalog") !== "0";
   const sections = url.searchParams.get("sections") !== "0";
   const instructors = url.searchParams.get("instructors") !== "0";
+  const text = url.searchParams.get("text") !== "0";
 
   try {
     const result = await syncDetails(getDb(), term, {
@@ -41,6 +42,7 @@ export const POST: APIRoute = async ({ request }) => {
       catalog,
       sections,
       instructors,
+      text,
       courseDelayMs: delayMs,
     });
     return json({ ok: true, ...result });

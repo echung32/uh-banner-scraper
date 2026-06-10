@@ -29,6 +29,16 @@ function findLocalD1File(): string {
   return join(dir, file);
 }
 
+interface SeedFaculty {
+  bannerId: string;
+  category: string | null;
+  courseReferenceNumber: string;
+  displayName: string | null;
+  emailAddress: string | null;
+  primaryIndicator: boolean;
+  term: string;
+}
+
 function icsSection(
   crn: string,
   courseNumber: string,
@@ -36,6 +46,7 @@ function icsSection(
   title: string,
   campusDescription = "University of Hawaii at Manoa"
 ) {
+  const faculty: SeedFaculty[] = [];
   return {
     id: Number(crn),
     term: "202710",
@@ -62,7 +73,7 @@ function icsSection(
     linkIdentifier: null,
     isSectionLinked: false,
     subjectCourse: `ICS ${courseNumber}`,
-    faculty: [],
+    faculty,
     meetingsFaculty: [],
     reservedSeatSummary: null,
     sectionAttributes: [],
@@ -79,6 +90,20 @@ const SECTIONS = [
   // A non-Manoa section so the campus filter has something to exclude: the
   // default UH-Manoa search hides it, "All Campuses" reveals it.
   icsSection("10007", "101", "001", "Tools for the Information World", "University of Hawaii at Hilo"),
+];
+
+// Give the first section a faculty member so the details panel's instructor card
+// (served from the seeded `instructor` row below) has a bannerId to fetch.
+SECTIONS[0].faculty = [
+  {
+    bannerId: "9001",
+    category: "01",
+    courseReferenceNumber: "10001",
+    displayName: "Jane Instructor",
+    emailAddress: "jane@hawaii.edu",
+    primaryIndicator: true,
+    term: "202710",
+  },
 ];
 
 export default function globalSetup() {
@@ -181,6 +206,23 @@ export default function globalSetup() {
       now
     );
   }
+
+  // Instructor contact card for the faculty seeded on CRN 10001, so the details
+  // panel's instructor card renders from D1 (read path; no lazy fetch here).
+  db.prepare(
+    `INSERT INTO instructor
+       (banner_id, display_name, title, department, college, email, raw_json, synced_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    "9001",
+    "Jane Instructor",
+    "Associate Professor",
+    "Information & Computer Sciences",
+    "College of Natural Sciences",
+    "jane@hawaii.edu",
+    "{}",
+    now
+  );
 
   db.close();
 }

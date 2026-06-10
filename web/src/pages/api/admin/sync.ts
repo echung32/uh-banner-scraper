@@ -27,13 +27,18 @@ export const POST: APIRoute = async ({ request }) => {
   const url = new URL(request.url);
   const term = url.searchParams.get("term");
   const delayMs = Number(url.searchParams.get("delayMs") ?? "250");
+  const perSessionParam = url.searchParams.get("subjectsPerSession");
+  const opts = {
+    subjectDelayMs: delayMs,
+    ...(perSessionParam ? { subjectsPerSession: Number(perSessionParam) } : {}),
+  };
   const db = getDb();
 
   try {
     const results: SyncResult[] = [];
 
     if (term) {
-      results.push(await syncTerm(db, term, { subjectDelayMs: delayMs }));
+      results.push(await syncTerm(db, term, opts));
     } else {
       // Refresh the term list, then sync all currently-searchable terms.
       await refreshTerms(db);
@@ -41,7 +46,7 @@ export const POST: APIRoute = async ({ request }) => {
         .prepare("SELECT code FROM term WHERE is_view_only = 0")
         .all<{ code: string }>();
       for (const t of terms) {
-        results.push(await syncTerm(db, t.code, { subjectDelayMs: delayMs }));
+        results.push(await syncTerm(db, t.code, opts));
       }
     }
 
