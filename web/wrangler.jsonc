@@ -11,14 +11,18 @@
   // `process.env.*` (the app relies on this — see astro.config.mjs).
   "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "observability": { "enabled": true },
+  // Keep the workers.dev URL (the live endpoint); disable per-deployment Preview
+  // URLs (we don't want preview/PR deploys — branch builds are off too).
+  "workers_dev": true,
+  "preview_urls": false,
   // Native D1 binding for the read path (replaces the HTTP-API shim, which now
   // serves only the Node ingestion CLI). `migrations_dir` keeps `wrangler d1
   // migrations apply` working.
   "d1_databases": [
     {
       "binding": "DB",
-      "database_name": "uh_sis",
-      "database_id": "04eae271-3025-48b5-8152-8fcaa9b5bbdc",
+      "database_name": "uh-course-search-db",
+      "database_id": "ef6df010-9587-4a18-82f7-d07251d90056",
       "migrations_dir": "./migrations"
     }
   ],
