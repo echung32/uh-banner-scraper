@@ -66,8 +66,8 @@ path). Everything else fills in on demand via the page cache.
 **Historical sweep (sections only):** on [2026-06-11](2026-06-11.md) a bulk newest→oldest
 sweep also backfilled **sections** (no catalog/details pass) for the **2024–2025** terms —
 Fall 2025 → Fall 2024 plus their Summer/Spring/Extension/Apprenticeship variants (15 terms,
-~31k sections) — before Banner throttled on **Spring 2024 (`202430`, partial — needs reset +
-re-run)**. **~76 terms remain** (Spring 2024 and older, to Fall 2015 `201610`); re-run
+~31k sections) — before Banner throttled on **Spring 2024 (`202430`, partial — reset to
+unsynced for a clean re-run)**. **77 terms remain** (Spring 2024 and older, to Fall 2015 `201610`); re-run
 `web/scripts/backfill-sweep.sh` after a cooldown to continue. These have **sections but no
 catalog facts** (college/department) until a later details pass.
 
