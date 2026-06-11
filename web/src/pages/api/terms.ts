@@ -1,7 +1,8 @@
 import type { APIRoute } from "astro";
 import { fetchTerms } from "@/lib/search";
+import { withEdgeCache } from "@/lib/edgeCache";
 
-export const GET: APIRoute = async () => {
+async function handleTerms(): Promise<Response> {
   try {
     const terms = await fetchTerms();
     return new Response(JSON.stringify(terms), {
@@ -15,4 +16,10 @@ export const GET: APIRoute = async () => {
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
+}
+
+export const GET: APIRoute = async ({ request }) => {
+  // The term list changes a handful of times a year (refresh-terms), so a plain
+  // TTL bound is enough — no data-version key like the term-scoped routes.
+  return withEdgeCache(request, { version: "terms", ttlSeconds: 3600 }, handleTerms);
 };

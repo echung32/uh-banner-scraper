@@ -73,12 +73,15 @@ export default defineConfig({
       //   INGEST_ON_WORKER=1→ enable the admin ingestion routes for the ingest
       //                       spec (tiny mock catalog — no real CPU pressure;
       //                       production leaves this unset, so those routes 501).
+      //   EDGE_CACHE=0      → the ingestion specs mutate D1 mid-run; reads must
+      //                       observe fresh data, not a cached response.
       command:
         `yarn build && yarn wrangler dev --ip 127.0.0.1 --port ${APP_PORT}` +
         ` --persist-to ${E2E_PERSIST}` +
         ` --var SIS_BASE_URL:${SIS_BASE_URL}` +
         ` --var DYNAMIC_SYNC:1 --var COURSE_TEXT_LAZY:0 --var LOG_SOURCE:0` +
-        ` --var INGEST_ON_WORKER:1 --var ADMIN_SECRET:${ADMIN_SECRET}`,
+        ` --var INGEST_ON_WORKER:1 --var ADMIN_SECRET:${ADMIN_SECRET}` +
+        ` --var EDGE_CACHE:0`,
       url: `http://127.0.0.1:${APP_PORT}`,
       reuseExistingServer: !process.env.CI,
       stdout: "pipe",

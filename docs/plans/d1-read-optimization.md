@@ -1,6 +1,28 @@
 # D1 read-path optimization (rows-read budget)
 
-Status: **planned**.
+Status: **implemented** (pending remote migration apply + deploy). Deltas from the
+original plan, found during implementation:
+
+- The `(? IS NULL OR col = ?)` bind pattern in `buildSectionFilter` was itself a
+  scan-forcer — SQLite can't push that form into an index range, so even
+  subject-filtered searches scanned the whole term. The WHERE is now built
+  conditionally (and the `course` LEFT JOIN included only when a college/department
+  filter needs it).
+- A **second** expression index (`idx_cs_subj_sort`: `term, subject, <catalog-num
+  expr>, sequence_number, crn`) serves single-subject searches streamed:
+  `resolveSort` drops the constant `subject_description` key under a subject
+  filter. It replaces `idx_cs_term_subject` (same equality prefix), so net new
+  index count — and per-insert write cost — is +1, as planned.
+- `/api/coverage`'s backfilled flavor (a term-wide window aggregate) is also
+  edge-cached; `/api/course`/`section`/`instructor` are not (1-row reads).
+- College/Department menus are materialized into `filter_option` under
+  campus-encoded kinds (`college@<campusDesc>`, `@*` = unscoped) by the details
+  sync, with a fallback derive for terms whose details pass hasn't rerun yet.
+- The subject menu reads the `subject` table alone (every section producer
+  enumerates subjects first); the e2e fixture now seeds it accordingly.
+- Verified via `wrangler dev` against the real local snapshot: `x-edge-cache`
+  miss→hit, param-order-normalized keys, byte-identical bodies, correct asc/desc
+  orders, 40/40 e2e specs green.
 
 ## Problem
 
