@@ -21,6 +21,8 @@ export interface SearchFormValues {
   college: string;
   department: string;
   openOnly: boolean;
+  /** CRN search: when set, identifies one section and overrides every other filter. */
+  crn: string;
 }
 
 interface SearchFormProps {
@@ -74,6 +76,7 @@ export function SearchForm({
   const [college, setCollege] = useState(initialValues.college);
   const [department, setDepartment] = useState(initialValues.department);
   const [openOnly, setOpenOnly] = useState(initialValues.openOnly);
+  const [crn, setCrn] = useState(initialValues.crn);
 
   const [subjectOptions, setSubjectOptions] = useState<AutocompleteItem[]>([]);
   const [collegeOptions, setCollegeOptions] = useState<AutocompleteItem[]>([]);
@@ -152,6 +155,10 @@ export function SearchForm({
   const collegeUnavailable = !catalogLoading && collegeOptions.length === 0;
   const departmentUnavailable = !catalogLoading && departmentOptions.length === 0;
 
+  // A CRN identifies exactly one section, so a CRN search ignores every other
+  // filter — disable them to make that exclusivity obvious.
+  const crnMode = crn.trim().length > 0;
+
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!term) return;
@@ -163,6 +170,7 @@ export function SearchForm({
       college,
       department,
       openOnly,
+      crn: crn.trim(),
     });
   }
 
@@ -202,6 +210,7 @@ export function SearchForm({
             searchPlaceholder="Search subjects…"
             emptyText="No subjects for this term."
             clearLabel="All Subjects"
+            disabled={crnMode}
           />
         </div>
 
@@ -213,7 +222,25 @@ export function SearchForm({
             value={courseNumber}
             onChange={(e) => setCourseNumber(e.target.value)}
             maxLength={10}
+            disabled={crnMode}
           />
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="crn">CRN</Label>
+          <Input
+            id="crn"
+            inputMode="numeric"
+            placeholder="e.g. 71843"
+            value={crn}
+            onChange={(e) => setCrn(e.target.value)}
+            maxLength={10}
+          />
+          {crnMode && (
+            <p className="text-xs text-muted-foreground">
+              Looks up one section in the selected term; other filters are ignored.
+            </p>
+          )}
         </div>
 
         <div className="space-y-2">
@@ -226,6 +253,7 @@ export function SearchForm({
             placeholder="Select a campus"
             searchPlaceholder="Search campuses…"
             emptyText="No campuses."
+            disabled={crnMode}
           />
         </div>
 
@@ -240,7 +268,7 @@ export function SearchForm({
             searchPlaceholder="Search colleges…"
             emptyText="No colleges."
             clearLabel="All Colleges"
-            disabled={collegeUnavailable}
+            disabled={collegeUnavailable || crnMode}
           />
           {collegeUnavailable && (
             <p className="text-xs text-muted-foreground">
@@ -260,7 +288,7 @@ export function SearchForm({
             searchPlaceholder="Search departments…"
             emptyText="No departments."
             clearLabel="All Departments"
-            disabled={departmentUnavailable}
+            disabled={departmentUnavailable || crnMode}
           />
           {departmentUnavailable && (
             <p className="text-xs text-muted-foreground">
@@ -274,6 +302,7 @@ export function SearchForm({
             id="openOnly"
             checked={openOnly}
             onCheckedChange={setOpenOnly}
+            disabled={crnMode}
           />
           <Label htmlFor="openOnly">Open sections only</Label>
         </div>

@@ -14,6 +14,7 @@ import {
   getCoverageSummary,
   getFilterOptions,
   getInstructor,
+  getSectionByCrn,
   getSectionDetail,
   getSearchPageFromChunks,
   getSubjectFacet,
@@ -28,6 +29,7 @@ import {
 } from "@/lib/db/queries";
 import type {
   AutocompleteItem,
+  CourseSection,
   CoverageDetail,
   SearchCoverage,
   SearchParams,
@@ -49,6 +51,14 @@ export async function fetchSearchPage(
   params: SearchParams
 ): Promise<SearchResultsResponse> {
   return getSearchPageFromChunks(getDb(), params);
+}
+
+/** One section by (term, CRN) from D1 — the CRN search's read (null if absent). */
+export async function fetchSectionByCrn(
+  term: string,
+  crn: string
+): Promise<CourseSection | null> {
+  return getSectionByCrn(getDb(), term, crn);
 }
 
 /** Sync state for a term (null if unknown) — drives the search route's branch. */

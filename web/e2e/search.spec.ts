@@ -99,10 +99,10 @@ test("campus filter defaults to UH Manoa and widens to all campuses", async ({ p
   await runSearch(page, "ICS", "");
   expect(await totalSections(page)).toBe(6);
   await expect(
-    page.getByRole("cell", { name: "University of Hawaii at Manoa" }).first()
+    page.getByRole("cell", { name: "UHM", exact: true }).first()
   ).toBeVisible();
   await expect(
-    page.getByRole("cell", { name: "University of Hawaii at Hilo" })
+    page.getByRole("cell", { name: "UHH", exact: true })
   ).toHaveCount(0);
 
   // Widen to all campuses → the Hilo section appears (7 total).
@@ -110,7 +110,7 @@ test("campus filter defaults to UH Manoa and widens to all campuses", async ({ p
   await runSearch(page, "ICS", "");
   await expect(page.getByText(/of 7 sections/)).toBeVisible();
   await expect(
-    page.getByRole("cell", { name: "University of Hawaii at Hilo" })
+    page.getByRole("cell", { name: "UHH", exact: true })
   ).toBeVisible();
 });
 
@@ -157,7 +157,11 @@ test("expanding a section row shows catalog, lazily-fetched detail, and instruct
   // view and stored (lazy cache-on-miss). The mock serves a $50 fee and marks
   // CRN 10001 cross-listed with 10002.
   await expect(page.getByText("$50.00")).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByText("10002", { exact: true })).toBeVisible();
+  // CRN 10002 now also appears in the table's CRN column, so scope this to the
+  // expanded panel's "Cross-listed CRNs" section.
+  await expect(
+    page.getByText("Cross-listed CRNs").locator("xpath=../following-sibling::div")
+  ).toHaveText("10002");
 
   // Collapsing hides the panel again.
   await page.getByRole("cell", { name: "ICS 111" }).first().click();
@@ -186,6 +190,27 @@ test("running a search reflects the filters in the URL", async ({ page }) => {
   // The address bar now carries the executed search, ready to share.
   await expect(page).toHaveURL(/[?&]subject=ICS\b/);
   await expect(page).toHaveURL(/[?&]courseNumber=111\b/);
+});
+
+test("CRN search returns the single matching section", async ({ page }) => {
+  // CRN search is exclusive: entering a CRN looks up one section in the default
+  // term (202710, backfilled → served straight from D1) and ignores every other
+  // filter. CRN 10001 is ICS 111 §001.
+  await page.getByLabel("CRN").fill("10001");
+  const searchButton = page.getByRole("button", { name: "Search", exact: true });
+  await expect(searchButton).toBeEnabled();
+  await searchButton.click();
+
+  await expect(page.getByText(/of 1 sections/)).toBeVisible();
+  await expect(page.getByRole("cell", { name: "10001", exact: true })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "ICS 111" })).toHaveCount(1);
+  await expect(page).toHaveURL(/[?&]crn=10001\b/);
+
+  // A CRN absent from the (backfilled) term yields no rows — no live call.
+  await page.getByLabel("CRN").fill("99999");
+  await expect(searchButton).toBeEnabled();
+  await searchButton.click();
+  await expect(page.getByText("No results found")).toBeVisible();
 });
 
 test("course number filter narrows the results", async ({ page }) => {

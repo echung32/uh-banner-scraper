@@ -226,6 +226,31 @@ const server = createServer(async (req, res) => {
     if (kind in FILTER_OPTIONS) return sendJson(res, 200, FILTER_OPTIONS[kind]);
   }
 
+  // Class-details modal fragment (CRN-lookup live fallback). Echoes the section's
+  // identity — CRN + the catalog course number — for the requested CRN; an
+  // unknown CRN yields a fragment with no courseReferenceNumber (the "no such
+  // section" signal parseClassDetails keys on).
+  if (path === "/ssb/searchResults/getClassDetails") {
+    const body = await readBody(req);
+    const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
+    const sec = CATALOG.find((s) => s.courseReferenceNumber === crn);
+    if (!sec) {
+      return sendHtml(res, 200, `<section aria-labelledby="classDetails">No section found.</section>`);
+    }
+    return sendHtml(
+      res,
+      200,
+      `<section aria-labelledby="classDetails">
+        <span class="status-bold">CRN:</span><span id="courseReferenceNumber">${sec.courseReferenceNumber}</span><br/>
+        <span class="status-bold">Subject:</span><span id="subject">${sec.subjectDescription}</span><br/>
+        <span class="status-bold">Course Number:</span>
+        <span id="courseNumber" style="display:none;">${sec.courseNumber}0</span>
+        <span id="courseDisplay">${sec.courseNumber}</span><br/>
+        <span class="status-bold">Title:</span><span id="courseTitle">${sec.courseTitle}</span><br/>
+      </section>`
+    );
+  }
+
   // Course-level catalog fragment (details ingest, per representative CRN).
   if (path === "/ssb/searchResults/getSectionCatalogDetails") {
     const body = await readBody(req);
