@@ -182,6 +182,13 @@ export default function globalSetup() {
     );
   }
 
+  // The subject menu is served from the `subject` table alone (the production
+  // sync enumerates subjects before storing sections — mirror that here).
+  const subjectStmt = db.prepare(
+    "INSERT OR IGNORE INTO subject (term, code, description) VALUES (?, ?, ?)"
+  );
+  for (const s of SECTIONS) subjectStmt.run(s.term, s.subject, s.subjectDescription);
+
   // Course catalog rows (what a details sync would produce). College/department
   // are per (campus, course); ICS 311 sits in a different college so the College
   // filter has something to exclude.

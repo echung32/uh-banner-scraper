@@ -40,6 +40,7 @@ import {
 } from "@/lib/sis/parse/sectionDetail";
 import type { SisSession } from "@/lib/sis/types";
 import type { D1Like } from "@/lib/db/types";
+import { catalogFacetKind, deriveCatalogFacet } from "@/lib/db/queries";
 import {
   finishSyncRun,
   replaceFilterOptions,
@@ -143,6 +144,39 @@ async function syncFilterOptions(
     }
   }
   return { kinds, options, status };
+}
+
+/**
+ * Materializes the College/Department dropdown menus into `filter_option` —
+ * one menu per (facet, campus) plus the unscoped all-campuses menu, under the
+ * `catalogFacetKind` keys. The read path (queries.getCatalogFacet) prefers these
+ * rows over re-deriving from `course` per request, which would scan the term's
+ * ~5k course rows each time (a D1 rows-read cost). Pure D1 (no Banner); runs
+ * after the catalog pass so the course rows it derives from are fresh.
+ */
+export async function materializeCatalogFacets(
+  db: D1Like,
+  term: string,
+  log: (m: string) => void = () => {}
+): Promise<number> {
+  const { results: campuses } = await db
+    .prepare(
+      "SELECT DISTINCT campus_description AS campus FROM course"
+        + " WHERE term = ? AND campus_description <> ''"
+    )
+    .bind(term)
+    .all<{ campus: string }>();
+
+  let total = 0;
+  for (const facet of ["college", "department"] as const) {
+    const scopes: (string | undefined)[] = [undefined, ...campuses.map((c) => c.campus)];
+    for (const scope of scopes) {
+      const items = await deriveCatalogFacet(db, term, facet, scope);
+      total += await replaceFilterOptions(db, term, catalogFacetKind(facet, scope), items);
+    }
+  }
+  log(`[${term}] catalog facets: ${total} options across ${campuses.length} campuses`);
+  return total;
 }
 
 /**
@@ -357,6 +391,9 @@ export async function syncDetails(
       courses = c.courses;
       session = c.session;
       if (c.status === "partial") status = "partial";
+      // Refresh the materialized College/Department menus from the just-written
+      // course rows so the read path serves them without a per-request derive.
+      await materializeCatalogFacets(db, term, log);
     }
     if (doSections) {
       const sd = await syncSectionDetails(db, session, term, delay, log);

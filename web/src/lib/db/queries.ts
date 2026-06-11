@@ -41,19 +41,32 @@ const SORT_COLUMNS: Record<string, string> = {
  */
 const CATALOG_NUMBER_SQL = "trim(substr(cs.subject_course, length(cs.subject) + 1))";
 
-function resolveSort(column: string | undefined, direction: string | undefined): string {
+function resolveSort(
+  column: string | undefined,
+  direction: string | undefined,
+  subjectFiltered = false
+): string {
   const col = SORT_COLUMNS[column ?? "subjectDescription"] ?? "subject_description";
   const dir = (direction ?? "asc").toLowerCase() === "desc" ? "DESC" : "ASC";
-  // Columns are qualified `cs.` because searchSections joins the course table.
+  // Columns are qualified `cs.` because searchSections may join the course table.
   // Tiebreak by catalog course number, then sequence, then (term, crn): within a
-  // subject (where subject_description is constant) this yields ascending course
-  // order instead of the effectively-random CRN order. CATALOG_NUMBER_SQL is the
+  // subject (where subject_description is constant) this yields course order
+  // instead of the effectively-random CRN order. CATALOG_NUMBER_SQL is the
   // displayed catalog number (e.g. "111"), not Banner's internal padded
   // course_number (e.g. "1110") — see buildSectionFilter.
-  return (
-    `cs.${col} ${dir}, ${CATALOG_NUMBER_SQL} ASC,`
-    + " cs.sequence_number ASC, cs.term ASC, cs.crn ASC"
-  );
+  //
+  // The tiebreaks MIRROR the primary direction: the default sort is served
+  // streamed from the expression indexes in migrations/0007_sort_indexes.sql, and
+  // a DESC primary with ASC tiebreaks can't be satisfied by a backward index scan
+  // (verified: it falls back to a temp B-tree over the whole term).
+  const tail =
+    `${CATALOG_NUMBER_SQL} ${dir},`
+    + ` cs.sequence_number ${dir}, cs.term ${dir}, cs.crn ${dir}`;
+  // Under a single-subject filter, subject_description is constant, so sorting by
+  // it is a no-op — dropping it lets the planner stream from idx_cs_subj_sort
+  // (term=? AND subject=?) instead of scanning the term in description order.
+  if (subjectFiltered && col === "subject_description") return tail;
+  return `cs.${col} ${dir}, ${tail}`;
 }
 
 export interface TermSyncMeta {
@@ -124,27 +137,25 @@ export const FILTER_KINDS = [
 export type FilterKind = (typeof FILTER_KINDS)[number];
 
 /**
- * Subject menu for a term — the union of subjects with sections present
- * (`course_section`) and the enumerated `subject` table. The union matters for
- * not-yet-backfilled terms: their sections are filled lazily per subject, so the
- * menu would be empty until the `subject` table is populated (see
- * dynamicSync.ensureTermSubjects). `code` is the subject code the search filters
- * on; `description` is Banner's subject name.
+ * Subject menu for a term — served from the enumerated `subject` table alone
+ * (PK lookup, ~270 rows). Every section producer enumerates subjects first: the
+ * full sync (sync.ts) and the dynamic-term menu fill (dynamicSync.
+ * ensureTermSubjects) both upsert the table, so a term with sections has its
+ * subjects here. (This used to UNION in the distinct subjects of
+ * `course_section`, but that scanned every section row of the term on each menu
+ * load — a D1 rows-read cost — to cover only the crnLazy edge case, where a lone
+ * CRN-fetched section could predate enumeration; the menu self-heals on first
+ * open via ensureTermSubjects, so the union wasn't worth the scan.)
+ * `code` is the subject code the search filters on; `description` is Banner's
+ * subject name.
  */
 export async function getSubjectFacet(
   db: D1Like,
   term: string
 ): Promise<AutocompleteItem[]> {
   const { results } = await db
-    .prepare(
-      `SELECT code, MAX(description) AS description FROM (
-         SELECT subject AS code, subject_description AS description
-           FROM course_section WHERE term = ?
-         UNION ALL
-         SELECT code, description FROM subject WHERE term = ?
-       ) GROUP BY code ORDER BY code ASC`
-    )
-    .bind(term, term)
+    .prepare("SELECT code, description FROM subject WHERE term = ? ORDER BY code ASC")
+    .bind(term)
     .all<{ code: string; description: string }>();
   return results.map((r) => ({ code: r.code, description: r.description }));
 }
@@ -167,12 +178,27 @@ export async function getFilterOptions(
 }
 
 /**
- * Catalog facets (college, department) — derived from the ingested `course`
- * table, NOT `filter_option` (UH's `get_college`/`get_department` return empty;
- * verified live). Scoped by campus since colleges differ per campus. Returns
- * `[{ code, description }]` for a dropdown.
+ * The `filter_option.kind` a materialized catalog facet is stored under. Campus
+ * is part of the menu's identity (colleges differ per campus), so it's encoded
+ * into the kind; `*` is the unscoped (all-campuses) menu. Written by the details
+ * sync (materializeCatalogFacets), read by getCatalogFacet.
  */
-export async function getCatalogFacet(
+export function catalogFacetKind(
+  facet: "college" | "department",
+  campusDescription?: string
+): string {
+  return `${facet}@${campusDescription ?? "*"}`;
+}
+
+/**
+ * Derives a catalog facet (college, department) from the ingested `course` table
+ * — NOT `filter_option`'s Banner menus (UH's `get_college`/`get_department`
+ * return empty; verified live). Scoped by campus since colleges differ per
+ * campus. This scans the term's course rows (~5k), so the read path only falls
+ * back to it when no materialized menu exists yet; the details sync also calls
+ * it to produce the materialized rows.
+ */
+export async function deriveCatalogFacet(
   db: D1Like,
   term: string,
   facet: "college" | "department",
@@ -195,6 +221,32 @@ export async function getCatalogFacet(
     .bind(...binds)
     .all<{ code: string; description: string }>();
   return results.map((r) => ({ code: r.code, description: r.description }));
+}
+
+/**
+ * Catalog facets (college, department) for a dropdown. Prefers the menu
+ * materialized into `filter_option` at details-sync time (a PK-ranged read of a
+ * few dozen rows); falls back to deriving from `course` for terms whose details
+ * pass hasn't run since materialization shipped. Returns `[{ code, description }]`.
+ */
+export async function getCatalogFacet(
+  db: D1Like,
+  term: string,
+  facet: "college" | "department",
+  campusDescription?: string
+): Promise<AutocompleteItem[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT code, description FROM filter_option
+         WHERE term = ? AND kind = ?
+         ORDER BY display_order ASC, code ASC`
+    )
+    .bind(term, catalogFacetKind(facet, campusDescription))
+    .all<{ code: string; description: string }>();
+  if (results.length > 0) {
+    return results.map((r) => ({ code: r.code, description: r.description }));
+  }
+  return deriveCatalogFacet(db, term, facet, campusDescription);
 }
 
 export interface CourseCatalog {
@@ -365,55 +417,63 @@ export async function getInstructor(
  * freshness view (getBackfillCoverageDetail) reproduces the *exact* filter/sort as
  * the paginated search, guaranteeing window N lines up with search page N.
  *
- * College/Department live on the `course` table, so we LEFT JOIN it on
+ * Clauses are built CONDITIONALLY — only for filters actually present — never as
+ * `(? IS NULL OR col = ?)`. The OR form defeats the query planner (it can't push
+ * the equality into an index range), which forced a full-term scan on every
+ * search; static clauses let the sort/subject indexes (migration 0007) serve the
+ * common shapes streamed. D1 bills rows *scanned*, so this is a cost fix, not
+ * just a speed fix.
+ *
+ * College/Department live on the `course` table, so those filters LEFT JOIN it on
  * (term, campus, subject, course_number) — a 1:0..1 join (course PK is exactly
- * those four cols), so COUNT and pagination are unaffected when no catalog filter
- * is applied. Columns are `cs.`/`c.` qualified.
+ * those four cols), so COUNT and pagination are unaffected. The join is included
+ * only when a catalog filter is applied; it would otherwise cost a PK probe per
+ * emitted row. Columns are `cs.`/`c.` qualified.
  */
 function buildSectionFilter(params: SearchParams): {
   from: string;
   where: string;
-  binds: (string | number | null)[];
+  binds: (string | number)[];
 } {
-  const from =
-    "course_section cs LEFT JOIN course c"
-    + " ON c.term = cs.term AND c.campus_description = cs.campus_description"
-    + " AND c.subject = cs.subject AND c.course_number = cs.course_number";
-
-  const where = "cs.term = ?"
-    + " AND (? IS NULL OR cs.subject = ?)"
-    + ` AND (? IS NULL OR ${CATALOG_NUMBER_SQL} = ?)`
-    + " AND (? IS NULL OR cs.campus_description = ?)"
-    + " AND (? IS NULL OR c.college_code = ?)"
-    + " AND (? IS NULL OR c.department_code = ?)"
-    + " AND (? = 0 OR cs.open_section = 1)";
+  const clauses = ["cs.term = ?"];
+  const binds: (string | number)[] = [params.term];
 
   // Subject is optional on the read path: empty/absent → search all subjects.
-  const subject = params.subject ? params.subject : null;
-  const courseNumber = params.courseNumber ?? null;
+  if (params.subject) {
+    clauses.push("cs.subject = ?");
+    binds.push(params.subject);
+  }
+  if (params.courseNumber) {
+    clauses.push(`${CATALOG_NUMBER_SQL} = ?`);
+    binds.push(params.courseNumber);
+  }
   // Sections store only the campus description, so map the selected code to it;
-  // an unknown/absent code yields NULL → no campus filter (all campuses).
+  // an unknown code yields null → no campus filter (all campuses), matching the
+  // previous behavior.
   const campusDescription = params.campus
     ? campusDescriptionForCode(params.campus)
     : null;
-  const college = params.college ?? null;
-  const department = params.department ?? null;
-  const openOnly = params.openOnly ? 1 : 0;
-  const binds = [
-    params.term,
-    subject,
-    subject,
-    courseNumber,
-    courseNumber,
-    campusDescription,
-    campusDescription,
-    college,
-    college,
-    department,
-    department,
-    openOnly,
-  ];
-  return { from, where, binds };
+  if (campusDescription) {
+    clauses.push("cs.campus_description = ?");
+    binds.push(campusDescription);
+  }
+  if (params.college) {
+    clauses.push("c.college_code = ?");
+    binds.push(params.college);
+  }
+  if (params.department) {
+    clauses.push("c.department_code = ?");
+    binds.push(params.department);
+  }
+  if (params.openOnly) clauses.push("cs.open_section = 1");
+
+  const from =
+    params.college || params.department
+      ? "course_section cs LEFT JOIN course c"
+        + " ON c.term = cs.term AND c.campus_description = cs.campus_description"
+        + " AND c.subject = cs.subject AND c.course_number = cs.course_number"
+      : "course_section cs";
+  return { from, where: clauses.join(" AND "), binds };
 }
 
 /**
@@ -449,7 +509,7 @@ export async function searchSections(
   const { results } = await db
     .prepare(
       `SELECT cs.raw_json AS raw_json FROM ${from} WHERE ${where}`
-        + ` ORDER BY ${resolveSort(params.sortColumn, params.sortDirection)}`
+        + ` ORDER BY ${resolveSort(params.sortColumn, params.sortDirection, Boolean(params.subject))}`
         + " LIMIT ? OFFSET ?"
     )
     .bind(...filterBinds, params.pageMaxSize, params.pageOffset)
@@ -698,7 +758,7 @@ export async function getBackfillCoverageDetail(
   meta: TermSyncMeta
 ): Promise<CoverageDetail> {
   const { from, where, binds } = buildSectionFilter(params);
-  const order = resolveSort(params.sortColumn, params.sortDirection);
+  const order = resolveSort(params.sortColumn, params.sortDirection, Boolean(params.subject));
   const { results } = await db
     .prepare(
       `SELECT (rn - 1) / ${CHUNK_SIZE} AS chunk_index, COUNT(*) AS count,
