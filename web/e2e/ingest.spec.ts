@@ -154,6 +154,25 @@ test("details sync persists filter options and course catalog", async ({ request
   expect(missing.status()).toBe(404);
 });
 
+test("CRN search on a dynamic term fetches the section live, then from D1", async ({ request }) => {
+  // 202740 is dynamic and still empty at this point (the page-cache test below is
+  // what first populates it). A CRN search must therefore miss D1, fetch the
+  // single section live from Banner via the class-details → course-number-scoped
+  // searchResults fallback, store it, and return exactly that one section.
+  const DYN = "202740";
+  const hit = await request.get("/api/search", { params: { term: DYN, crn: "20001" } });
+  expect(hit.ok()).toBeTruthy();
+  const body = await hit.json();
+  expect(body.totalCount).toBe(1);
+  expect(body.data[0].courseReferenceNumber).toBe("20001");
+  expect(body.data[0].subjectCourse).toBe("MATH 241");
+
+  // A CRN that doesn't exist in the term returns no section (getClassDetails
+  // reports no such section, so the fallback gives up cleanly).
+  const miss = await request.get("/api/search", { params: { term: DYN, crn: "99999" } });
+  expect((await miss.json()).totalCount).toBe(0);
+});
+
 test("page cache serves a dynamic term from Banner, then from D1", async ({ request }) => {
   // 202740 is seeded dynamic (last_synced_at NULL) with no sections. An
   // "All Subjects" search must fetch the whole-term page live from Banner (the

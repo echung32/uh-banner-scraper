@@ -4,6 +4,7 @@
  */
 import type {
   AutocompleteItem,
+  CourseSection,
   CoverageDetail,
   SearchCoverage,
   SearchParams,
@@ -413,6 +414,24 @@ function buildSectionFilter(params: SearchParams): {
     openOnly,
   ];
   return { from, where, binds };
+}
+
+/**
+ * One section by `(term, crn)` — the CRN search's D1 read. A CRN is unique within
+ * a term (it's half the `course_section` primary key), so this returns at most one
+ * row, reconstructed byte-faithfully from `raw_json`. Null when not stored (the
+ * route may then try a live fetch for a dynamic term — see ingest/crnLazy).
+ */
+export async function getSectionByCrn(
+  db: D1Like,
+  term: string,
+  crn: string
+): Promise<CourseSection | null> {
+  const row = await db
+    .prepare("SELECT raw_json FROM course_section WHERE term = ? AND crn = ?")
+    .bind(term, crn)
+    .first<{ raw_json: string }>();
+  return row ? rowToCourseSection(row) : null;
 }
 
 export async function searchSections(

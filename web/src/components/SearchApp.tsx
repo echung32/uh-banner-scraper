@@ -29,6 +29,7 @@ const searchParsers = {
   college: parseAsString.withDefault(""),
   department: parseAsString.withDefault(""),
   openOnly: parseAsBoolean.withDefault(false),
+  crn: parseAsString.withDefault(""),
   page: parseAsInteger.withDefault(1),
   size: parseAsInteger.withDefault(DEFAULT_PAGE_SIZE),
 };
@@ -41,6 +42,7 @@ interface SearchQuery {
   college: string;
   department: string;
   openOnly: boolean;
+  crn: string;
   page: number;
   size: number;
 }
@@ -56,6 +58,26 @@ function SearchAppInner({ terms }: SearchAppProps) {
   async function runSearch(params: SearchQuery) {
     setIsLoading(true);
     setError(null);
+
+    // CRN search is exclusive: a CRN names one section, so send only term + crn
+    // and let the server ignore the rest.
+    if (params.crn) {
+      const crnQuery = new URLSearchParams({ term: params.term, crn: params.crn });
+      try {
+        const res = await fetch(`/api/search?${crnQuery.toString()}`);
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: "Unknown error" }));
+          throw new Error(err.error ?? "Search failed");
+        }
+        setResults((await res.json()) as SearchResultsResponse);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Search failed");
+        setResults(null);
+      } finally {
+        setIsLoading(false);
+      }
+      return;
+    }
 
     const query = new URLSearchParams({
       term: params.term,
@@ -102,6 +124,7 @@ function SearchAppInner({ terms }: SearchAppProps) {
     q.college,
     q.department,
     q.openOnly,
+    q.crn,
     q.page,
     q.size,
   ]);
@@ -130,6 +153,7 @@ function SearchAppInner({ terms }: SearchAppProps) {
     college: q.college,
     department: q.department,
     openOnly: q.openOnly,
+    crn: q.crn,
   };
   // Remount the form whenever the committed filters change (a new search or a
   // Back/Forward navigation) so its draft re-seeds from the URL. Paging changes
@@ -142,6 +166,7 @@ function SearchAppInner({ terms }: SearchAppProps) {
     q.college,
     q.department,
     q.openOnly,
+    q.crn,
   ].join("|");
   const coverageParams: CoverageParams | null = q.term
     ? {

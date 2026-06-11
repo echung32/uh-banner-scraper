@@ -383,6 +383,20 @@ async function postSectionFragment(
   return res.text();
 }
 
+/**
+ * Class-details modal HTML fragment (parse with lib/sis/parse/classDetails). The
+ * only per-CRN endpoint that echoes the section's identity — CRN, subject, the
+ * catalog course number, title — so the CRN-lookup live fallback uses it to learn
+ * a dynamic-term section's course number before re-querying searchResults.
+ */
+export function getClassDetails(
+  session: SisSession,
+  term: string,
+  crn: string
+): Promise<string> {
+  return postSectionFragment(session, term, crn, "getClassDetails");
+}
+
 /** Course catalog description HTML fragment (parse with lib/sis/parse/text). */
 export function getCourseDescription(
   session: SisSession,

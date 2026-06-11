@@ -5,11 +5,27 @@ import {
   fetchCoverageSummary,
   fetchSearchPage,
   fetchSearchResults,
+  fetchSectionByCrn,
   fetchTermSyncMeta,
 } from "@/lib/search";
 import { ensureSearchPage } from "@/lib/ingest/pageCache";
+import { ensureSectionByCrn } from "@/lib/ingest/crnLazy";
 import { logDb } from "@/lib/log";
-import type { SearchParams } from "@/lib/sis/types";
+import type { CourseSection, SearchParams, SearchResultsResponse } from "@/lib/sis/types";
+
+/** Wraps a CRN lookup as a single-(or zero-)row search response for the table. */
+function crnResponse(section: CourseSection | null): SearchResultsResponse {
+  const data = section ? [section] : [];
+  return {
+    success: true,
+    totalCount: data.length,
+    data,
+    pageOffset: 0,
+    pageMaxSize: data.length || 20,
+    sectionsFetchedCount: data.length,
+    pathMode: "search",
+  };
+}
 
 export const GET: APIRoute = async ({ request }) => {
   const url = new URL(request.url);
@@ -22,6 +38,31 @@ export const GET: APIRoute = async ({ request }) => {
       status: 400,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // CRN search is a distinct mode: a CRN identifies exactly one section within a
+  // term (it's unique only per-term — see docs), so it ignores every other filter
+  // and returns that single section. Serve from D1; for a dynamic (un-backfilled)
+  // term, fall back to a live Banner fetch on a miss (ensureSectionByCrn).
+  const crn = (url.searchParams.get("crn") ?? "").trim();
+  if (crn) {
+    try {
+      let section = await fetchSectionByCrn(term, crn);
+      if (!section && (await ensureSectionByCrn(getDb(), term, crn))) {
+        section = await fetchSectionByCrn(term, crn);
+      }
+      logDb(`crn ${term}/${crn} → ${section ? "1" : "0"}`);
+      return new Response(JSON.stringify(crnResponse(section)), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      console.error("CRN search failed:", err);
+      return new Response(
+        JSON.stringify({ error: "Failed to fetch CRN" }),
+        { status: 500, headers: { "Content-Type": "application/json" } }
+      );
+    }
   }
 
   const pageOffset = parseInt(url.searchParams.get("pageOffset") ?? "0", 10);

@@ -24,8 +24,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { SectionDetails } from "./SectionDetails";
 import { CoverageDialog, type CoverageParams } from "./CoverageDialog";
+import { abbreviateCampus } from "@/lib/campuses";
 import type { CourseSection, MeetingTime, SearchResultsResponse } from "@/lib/sis/types";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -89,14 +96,25 @@ function SectionRow({ section }: { section: CourseSection }) {
           }`}
         />
       </TableCell>
-      <TableCell className="font-mono text-xs">{section.subject}</TableCell>
+      <TableCell className="font-mono text-xs">{section.courseReferenceNumber}</TableCell>
       <TableCell className="font-mono font-medium">{section.subjectCourse}</TableCell>
       <TableCell className="text-sm text-muted-foreground">
-        {section.campusDescription ?? "—"}
+        {section.campusDescription ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span className="cursor-help underline decoration-dotted underline-offset-2">
+                {abbreviateCampus(section.campusDescription)}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>{section.campusDescription}</TooltipContent>
+          </Tooltip>
+        ) : (
+          "—"
+        )}
       </TableCell>
       <TableCell className="text-center">{section.sequenceNumber}</TableCell>
-      <TableCell className="max-w-[200px]">
-        <span className="line-clamp-2 text-sm">{section.courseTitle}</span>
+      <TableCell>
+        <span className="text-sm">{section.courseTitle}</span>
       </TableCell>
       <TableCell className="text-center">
         {section.creditHours ?? section.creditHourLow ?? "—"}
@@ -189,6 +207,7 @@ export function ResultsTable({
   const lastPageOffset = (totalPages - 1) * pageMaxSize;
 
   return (
+    <TooltipProvider delayDuration={150}>
     <div className="space-y-4">
       {results && (
         <div className="flex flex-col gap-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
@@ -279,7 +298,7 @@ export function ResultsTable({
           <TableHeader>
             <TableRow>
               <TableHead className="w-8" />
-              <TableHead className="w-16">Subj</TableHead>
+              <TableHead className="w-20">CRN</TableHead>
               <TableHead className="w-24">Course</TableHead>
               <TableHead>Campus</TableHead>
               <TableHead className="w-16 text-center">Sec</TableHead>
@@ -310,5 +329,6 @@ export function ResultsTable({
         </Table>
       </div>
     </div>
+    </TooltipProvider>
   );
 }
