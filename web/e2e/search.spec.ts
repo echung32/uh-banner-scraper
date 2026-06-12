@@ -213,6 +213,68 @@ test("CRN search returns the single matching section", async ({ page }) => {
   await expect(page.getByText("No results found")).toBeVisible();
 });
 
+test("clicking a cross-listed CRN opens the detail dialog for that section", async ({
+  page,
+}) => {
+  await runSearch(page, "ICS", "");
+  expect(await totalSections(page)).toBe(6);
+
+  // Expand ICS 311 §001 (CRN 10005) via its Course cell; the seeded section
+  // detail cross-lists 10004. (Clicking the CRN itself opens the dialog instead.)
+  await page.getByRole("cell", { name: "ICS 311" }).first().click();
+
+  // The cross-listed CRN renders as a clickable control. Scope to the panel's
+  // "Cross-listed CRNs" section — the table CRN column now also has a 10004
+  // button, so an unscoped role=button lookup would be ambiguous.
+  const crossListPanel = page
+    .getByText("Cross-listed CRNs")
+    .locator("xpath=../following-sibling::div");
+  const crossLink = crossListPanel.getByRole("button", { name: "10004", exact: true });
+  await expect(crossLink).toBeVisible();
+  await crossLink.click();
+
+  // The dialog opens showing CRN 10004 = ICS 211 "Intro to Computer Science II",
+  // and the permalink param is in the URL.
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("CRN 10004")).toBeVisible();
+  await expect(dialog.getByText("Intro to Computer Science II")).toBeVisible();
+  await expect(page).toHaveURL(/[?&]view=10004\b/);
+});
+
+test("clicking a CRN in the table opens the dialog and sets the permalink", async ({
+  page,
+}) => {
+  await runSearch(page, "ICS", "");
+  expect(await totalSections(page)).toBe(6);
+
+  // The CRN cell is its own link (the rest of the row toggles the inline panel).
+  // CRN 10004 is ICS 211 "Intro to Computer Science II".
+  await page.getByRole("button", { name: "10004", exact: true }).click();
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("CRN 10004")).toBeVisible();
+  await expect(dialog.getByText("Intro to Computer Science II")).toBeVisible();
+  // The URL now carries the shareable permalink (Copy link grabs this href).
+  await expect(page).toHaveURL(/[?&]view=10004\b/);
+
+  // The inline panel did NOT toggle open (CRN click stopped propagation): the
+  // instructor email only renders in the inline panel, never the dialog header.
+  await expect(page.getByText("jane@hawaii.edu")).toHaveCount(0);
+});
+
+test("a CRN permalink opens the detail dialog on load", async ({ page }) => {
+  // A shared link with the `view` param opens the dialog directly (as a recipient
+  // would experience it). CRN 10004 is ICS 211 "Intro to Computer Science II".
+  await page.goto("/?term=202710&view=10004");
+
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("CRN 10004")).toBeVisible();
+  await expect(dialog.getByText("Intro to Computer Science II")).toBeVisible();
+});
+
 test("course number filter narrows the results", async ({ page }) => {
   // First search: subject only.
   await runSearch(page, "ICS", "");

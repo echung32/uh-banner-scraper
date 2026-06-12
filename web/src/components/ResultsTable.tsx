@@ -33,6 +33,7 @@ import {
 import { SectionDetails } from "./SectionDetails";
 import { CoverageDialog, type CoverageParams } from "./CoverageDialog";
 import { abbreviateCampus } from "@/lib/campuses";
+import { formatMeetingTime } from "@/lib/meetingTime";
 import type { CourseSection, MeetingTime, SearchResultsResponse } from "@/lib/sis/types";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -50,36 +51,17 @@ interface ResultsTableProps {
   isLoading: boolean;
   onPageChange: (pageOffset: number) => void;
   onPageSizeChange: (pageMaxSize: number) => void;
+  /** Open the detail dialog for a CRN (e.g. a clicked cross-listed CRN). */
+  onSelectCrn: (crn: string) => void;
 }
 
-function formatDays(mt: MeetingTime): string {
-  const days = [
-    mt.monday && "M",
-    mt.tuesday && "T",
-    mt.wednesday && "W",
-    mt.thursday && "R",
-    mt.friday && "F",
-    mt.saturday && "Sa",
-    mt.sunday && "Su",
-  ].filter(Boolean);
-  return days.join("") || "—";
-}
-
-function formatTime(hhmm: string | null): string {
-  if (!hhmm) return "—";
-  const h = parseInt(hhmm.slice(0, 2), 10);
-  const m = hhmm.slice(2);
-  const ampm = h >= 12 ? "PM" : "AM";
-  const hour = h % 12 || 12;
-  return `${hour}:${m} ${ampm}`;
-}
-
-function formatMeetingTime(mt: MeetingTime): string {
-  if (!mt.beginTime && !mt.endTime) return "TBA";
-  return `${formatDays(mt)} ${formatTime(mt.beginTime)}–${formatTime(mt.endTime)}`;
-}
-
-function SectionRow({ section }: { section: CourseSection }) {
+function SectionRow({
+  section,
+  onSelectCrn,
+}: {
+  section: CourseSection;
+  onSelectCrn: (crn: string) => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const primaryFaculty = section.faculty.find((f) => f.primaryIndicator) ?? section.faculty[0];
   const meetings = section.meetingsFaculty.map((mf) => mf.meetingTime).filter((mt): mt is MeetingTime => mt != null);
@@ -98,7 +80,22 @@ function SectionRow({ section }: { section: CourseSection }) {
           }`}
         />
       </TableCell>
-      <TableCell className="font-mono text-xs">{section.courseReferenceNumber}</TableCell>
+      <TableCell className="font-mono text-xs">
+        {/* The CRN opens the detail dialog (which carries the shareable `view`
+            permalink); stop propagation so it doesn't also toggle the row's
+            inline panel. The rest of the row still expands inline on click. */}
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelectCrn(section.courseReferenceNumber);
+          }}
+          className="cursor-pointer text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+          title="Open details & shareable link"
+        >
+          {section.courseReferenceNumber}
+        </button>
+      </TableCell>
       <TableCell className="font-mono font-medium">{section.subjectCourse}</TableCell>
       <TableCell className="text-sm text-muted-foreground">
         {section.campusDescription ? (
@@ -190,7 +187,7 @@ function SectionRow({ section }: { section: CourseSection }) {
     {expanded && (
       <TableRow className="bg-muted/30 hover:bg-muted/30">
         <TableCell colSpan={COLUMN_COUNT} className="px-6 pt-0 align-top">
-          <SectionDetails section={section} />
+          <SectionDetails section={section} onSelectCrn={onSelectCrn} />
         </TableCell>
       </TableRow>
     )}
@@ -221,6 +218,7 @@ export function ResultsTable({
   isLoading,
   onPageChange,
   onPageSizeChange,
+  onSelectCrn,
 }: ResultsTableProps) {
   if (!isLoading && !results) return null;
 
@@ -349,7 +347,11 @@ export function ResultsTable({
               </TableRow>
             ) : (
               results?.data.map((section) => (
-                <SectionRow key={section.courseReferenceNumber} section={section} />
+                <SectionRow
+                  key={section.courseReferenceNumber}
+                  section={section}
+                  onSelectCrn={onSelectCrn}
+                />
               ))
             )}
           </TableBody>

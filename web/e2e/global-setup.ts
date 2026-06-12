@@ -225,6 +225,16 @@ export default function globalSetup() {
     );
   }
 
+  // Section detail for CRN 10005 (ICS 311) with a cross-listed sibling
+  // (CRN 10004 = ICS 211 "Intro to Computer Science II", a real seeded section),
+  // so /api/section returns a cross-list CRN the detail dialog can resolve.
+  // Seeded here (not for 10001) so the lazy-fetch test above — which needs
+  // 10001's detail absent — is unaffected. `synced_at` marks it "fetched".
+  db.prepare(
+    `INSERT INTO section_detail (term, crn, cross_list_crns, synced_at)
+     VALUES (?, ?, ?, ?)`
+  ).run("202710", "10005", JSON.stringify(["10004"]), now);
+
   // Instructor contact card for the faculty seeded on CRN 10001, so the details
   // panel's instructor card renders from D1 (read path; no lazy fetch here).
   db.prepare(

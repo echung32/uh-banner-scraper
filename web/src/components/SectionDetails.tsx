@@ -307,7 +307,41 @@ function isHttp(s: string): boolean {
   return /^https?:\/\//i.test(s);
 }
 
-export function SectionDetails({ section }: { section: CourseSection }) {
+/** Renders a list of CRNs; clickable (opens/navigates the detail dialog) when
+ *  `onSelectCrn` is provided, otherwise a plain comma-separated list. */
+function CrnList({
+  crns,
+  onSelectCrn,
+}: {
+  crns: string[];
+  onSelectCrn?: (crn: string) => void;
+}) {
+  if (!onSelectCrn) return <>{crns.join(", ")}</>;
+  return (
+    <span className="flex flex-wrap gap-x-2 gap-y-1">
+      {crns.map((crn) => (
+        <button
+          key={crn}
+          type="button"
+          onClick={() => onSelectCrn(crn)}
+          className="cursor-pointer font-mono text-blue-600 underline decoration-dotted underline-offset-2 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+        >
+          {crn}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+export function SectionDetails({
+  section,
+  onSelectCrn,
+}: {
+  section: CourseSection;
+  /** When set, cross-listed / linked CRNs render as clickable links that open
+   *  the detail dialog for that CRN (same term). */
+  onSelectCrn?: (crn: string) => void;
+}) {
   const [loading, setLoading] = useState(true);
   const [catalog, setCatalog] = useState<CourseCatalog | null>(null);
   const [detail, setDetail] = useState<SectionDetail | null>(null);
@@ -475,10 +509,14 @@ export function SectionDetails({ section }: { section: CourseSection }) {
         ) : null}
 
         {detail?.crossListCrns?.length ? (
-          <Section title="Cross-listed CRNs">{detail.crossListCrns.join(", ")}</Section>
+          <Section title="Cross-listed CRNs">
+            <CrnList crns={detail.crossListCrns} onSelectCrn={onSelectCrn} />
+          </Section>
         ) : null}
         {detail?.linkedCrns?.length ? (
-          <Section title="Linked CRNs">{detail.linkedCrns.join(", ")}</Section>
+          <Section title="Linked CRNs">
+            <CrnList crns={detail.linkedCrns} onSelectCrn={onSelectCrn} />
+          </Section>
         ) : null}
 
         {detail?.syllabus ? (

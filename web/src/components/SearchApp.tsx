@@ -8,6 +8,7 @@ import {
 import { NuqsAdapter } from "nuqs/adapters/react";
 import { SearchForm, type SearchFormValues } from "./SearchForm";
 import { ResultsTable } from "./ResultsTable";
+import { SectionDialog } from "./SectionDialog";
 import type { CoverageParams } from "./CoverageDialog";
 import { ALL_CAMPUSES, DEFAULT_CAMPUS } from "@/lib/campuses";
 import type { AutocompleteItem, SearchResultsResponse } from "@/lib/sis/types";
@@ -32,6 +33,11 @@ const searchParsers = {
   crn: parseAsString.withDefault(""),
   page: parseAsInteger.withDefault(1),
   size: parseAsInteger.withDefault(DEFAULT_PAGE_SIZE),
+  // `view` is a detail-dialog overlay, NOT a search filter: it holds the CRN
+  // whose full detail is shown in a modal. It is deliberately absent from the
+  // search-trigger effect below, so opening/closing the dialog never re-runs the
+  // table search. Distinct from `crn` (which is the one-row CRN search filter).
+  view: parseAsString.withDefault(""),
 };
 
 interface SearchQuery {
@@ -151,6 +157,15 @@ function SearchAppInner({ terms }: SearchAppProps) {
     setQ({ size: pageMaxSize, page: 1 });
   }
 
+  // Open / navigate the detail dialog. `view` is pushed as its own history entry
+  // so Back closes the dialog (or steps to the previously-viewed CRN).
+  function openDetail(crn: string) {
+    setQ({ view: crn });
+  }
+  function closeDetail() {
+    setQ({ view: "" });
+  }
+
   // Form draft seed + coverage key both derive from the committed URL query.
   const formValues: SearchFormValues = {
     term: q.term,
@@ -211,6 +226,14 @@ function SearchAppInner({ terms }: SearchAppProps) {
         isLoading={isLoading}
         onPageChange={handlePageChange}
         onPageSizeChange={handlePageSizeChange}
+        onSelectCrn={openDetail}
+      />
+
+      <SectionDialog
+        term={q.term}
+        crn={q.view || null}
+        onSelectCrn={openDetail}
+        onClose={closeDetail}
       />
     </div>
   );
