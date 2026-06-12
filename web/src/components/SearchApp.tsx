@@ -51,6 +51,8 @@ function SearchAppInner({ terms }: SearchAppProps) {
   const [results, setResults] = useState<SearchResultsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Wall-clock duration (ms) of the most recent search/page fetch, client-side.
+  const [tookMs, setTookMs] = useState<number | null>(null);
   // `push` so each committed search / page change is its own history entry —
   // the browser Back/Forward buttons then step through prior searches.
   const [q, setQ] = useQueryStates(searchParsers, { history: "push" });
@@ -58,6 +60,7 @@ function SearchAppInner({ terms }: SearchAppProps) {
   async function runSearch(params: SearchQuery) {
     setIsLoading(true);
     setError(null);
+    const startedAt = performance.now();
 
     // CRN search is exclusive: a CRN names one section, so send only term + crn
     // and let the server ignore the rest.
@@ -70,9 +73,11 @@ function SearchAppInner({ terms }: SearchAppProps) {
           throw new Error(err.error ?? "Search failed");
         }
         setResults((await res.json()) as SearchResultsResponse);
+        setTookMs(performance.now() - startedAt);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Search failed");
         setResults(null);
+        setTookMs(null);
       } finally {
         setIsLoading(false);
       }
@@ -102,9 +107,11 @@ function SearchAppInner({ terms }: SearchAppProps) {
       }
       const data: SearchResultsResponse = await res.json();
       setResults(data);
+      setTookMs(performance.now() - startedAt);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Search failed");
       setResults(null);
+      setTookMs(null);
     } finally {
       setIsLoading(false);
     }
@@ -200,6 +207,7 @@ function SearchAppInner({ terms }: SearchAppProps) {
       <ResultsTable
         results={results}
         searchParams={coverageParams}
+        tookMs={tookMs}
         isLoading={isLoading}
         onPageChange={handlePageChange}
         onPageSizeChange={handlePageSizeChange}

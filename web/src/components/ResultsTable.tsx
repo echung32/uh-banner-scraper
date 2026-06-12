@@ -45,6 +45,8 @@ interface ResultsTableProps {
   results: SearchResultsResponse | null;
   /** Current search's sort + filters, for the cache-coverage grid. */
   searchParams: CoverageParams | null;
+  /** Wall-clock duration (ms) of the fetch that produced `results`. */
+  tookMs: number | null;
   isLoading: boolean;
   onPageChange: (pageOffset: number) => void;
   onPageSizeChange: (pageMaxSize: number) => void;
@@ -215,6 +217,7 @@ function SkeletonRows() {
 export function ResultsTable({
   results,
   searchParams,
+  tookMs,
   isLoading,
   onPageChange,
   onPageSizeChange,
@@ -243,6 +246,7 @@ export function ResultsTable({
                 <CoverageDialog params={searchParams} summary={results.coverage} />
               </>
             )}
+            {tookMs != null && <> · Took {Math.round(tookMs)} ms</>}
           </span>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
