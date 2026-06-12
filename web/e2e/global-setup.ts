@@ -111,6 +111,48 @@ SECTIONS[0].faculty = [
   },
 ];
 
+// CRN 10004 (ICS 211) gets a waitlist + a real meeting (with a location), so the
+// detail dialog's waitlist line and dedicated Meetings table have data to render.
+// Seats/waitlist live in raw_json (the read path reconstructs CourseSection from
+// it); only the indexed columns are inserted separately below.
+SECTIONS[3].waitCapacity = 5;
+SECTIONS[3].waitCount = 2;
+SECTIONS[3].waitAvailable = 3;
+SECTIONS[3].meetingsFaculty = [
+  {
+    bannerId: null,
+    category: null,
+    courseReferenceNumber: "10004",
+    displayName: null,
+    emailAddress: null,
+    primaryIndicator: false,
+    term: "202710",
+    meetingTime: {
+      beginTime: "0900",
+      endTime: "0950",
+      startDate: "08/25/2025",
+      endDate: "12/12/2025",
+      building: "KELLER",
+      buildingDescription: "Keller Hall",
+      campus: null,
+      campusDescription: null,
+      room: "101",
+      creditHourSession: null,
+      hoursWeek: null,
+      meetingScheduleType: null,
+      meetingType: null,
+      meetingTypeDescription: "Lecture",
+      monday: true,
+      tuesday: false,
+      wednesday: true,
+      thursday: false,
+      friday: true,
+      saturday: false,
+      sunday: false,
+    },
+  },
+];
+
 export default function globalSetup() {
   // Ensure the local D1 file exists with the current schema (idempotent).
   execSync(

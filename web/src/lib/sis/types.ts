@@ -16,7 +16,10 @@ export interface AutocompleteItem {
 export interface MeetingTime {
   beginTime: string | null;
   endTime: string | null;
-  beginDate: string | null;
+  // Banner names these `startDate`/`endDate` in the meetingTime payload (NOT
+  // `beginDate`). The field name must match exactly: sections are reconstructed
+  // verbatim from the stored raw_json, so a mismatched name reads as undefined.
+  startDate: string | null;
   endDate: string | null;
   building: string | null;
   buildingDescription: string | null;

@@ -273,6 +273,18 @@ test("a CRN permalink opens the detail dialog on load", async ({ page }) => {
   await expect(dialog).toBeVisible();
   await expect(dialog.getByText("CRN 10004")).toBeVisible();
   await expect(dialog.getByText("Intro to Computer Science II")).toBeVisible();
+
+  // Waitlist status renders in the header (10004 is seeded with a 2/5 waitlist).
+  await expect(dialog.getByText("2/5 waitlist (3 open)")).toBeVisible();
+
+  // The dedicated Meetings table shows the location, not just the time — the
+  // building/room appears alongside the day/time on its own row.
+  await expect(dialog.getByRole("columnheader", { name: "Location" })).toBeVisible();
+  await expect(dialog.getByRole("cell", { name: "Keller Hall 101" })).toBeVisible();
+  // Dates render from Banner's `startDate`/`endDate` (start must not be blank).
+  await expect(
+    dialog.getByRole("cell", { name: "08/25/2025 – 12/12/2025" })
+  ).toBeVisible();
 });
 
 test("course number filter narrows the results", async ({ page }) => {

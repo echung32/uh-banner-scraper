@@ -134,7 +134,7 @@ export function sectionToMeetingRows(section: CourseSection): MeetingRow[] {
       meeting_index: i,
       begin_time: m.beginTime,
       end_time: m.endTime,
-      begin_date: m.beginDate,
+      begin_date: m.startDate,
       end_date: m.endDate,
       building: m.building,
       building_desc: m.buildingDescription,
