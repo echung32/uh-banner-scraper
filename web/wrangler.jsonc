@@ -11,9 +11,9 @@
   // `process.env.*` (the app relies on this — see astro.config.mjs).
   "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "observability": { "enabled": true },
-  // Keep the workers.dev URL (the live endpoint); disable per-deployment Preview
-  // URLs (we don't want preview/PR deploys — branch builds are off too).
-  "workers_dev": true,
+  // Served from the custom domain; the workers.dev URL is disabled, as are
+  // per-deployment Preview URLs (no preview/PR deploys — branch builds are off too).
+  "workers_dev": false,
   "preview_urls": false,
   // Native D1 binding for the read path (replaces the HTTP-API shim, which now
   // serves only the Node ingestion CLI). `migrations_dir` keeps `wrangler d1
@@ -36,6 +36,7 @@
     "DYNAMIC_SYNC": "1",
     "SECTION_LAZY_FETCH": "1",
     "COURSE_TEXT_LAZY": "1",
+    "EDGE_CACHE": "1",
     "LOG_SOURCE": "0"
   }
 }

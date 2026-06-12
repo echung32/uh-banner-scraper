@@ -6,8 +6,9 @@
  */
 import type { APIRoute } from "astro";
 import { getDb } from "@/lib/db/binding";
-import { fetchFilterOptions } from "@/lib/search";
+import { fetchFilterOptions, fetchTermSyncMeta } from "@/lib/search";
 import { ensureTermSubjects } from "@/lib/ingest/dynamicSync";
+import { termCacheProfile, withEdgeCache } from "@/lib/edgeCache";
 import { FILTER_KINDS, type FilterKind } from "@/lib/db/queries";
 
 function bad(message: string, status = 400): Response {
@@ -15,6 +16,28 @@ function bad(message: string, status = 400): Response {
     status,
     headers: { "Content-Type": "application/json" },
   });
+}
+
+async function handleFilters(
+  term: string,
+  kind: FilterKind,
+  campus: string | undefined
+): Promise<Response> {
+  try {
+    // For a not-yet-backfilled term the subject menu would be empty — lazily
+    // enumerate its subjects from Banner so the dropdown is usable (a no-op for
+    // backfilled terms / when DYNAMIC_SYNC=0).
+    if (kind === "subject") await ensureTermSubjects(getDb(), term);
+
+    const options = await fetchFilterOptions(term, kind, campus);
+    return new Response(JSON.stringify({ kind, options }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (err) {
+    console.error("Filter options failed:", err);
+    return bad("Failed to fetch filter options", 500);
+  }
 }
 
 export const GET: APIRoute = async ({ request }) => {
@@ -29,19 +52,11 @@ export const GET: APIRoute = async ({ request }) => {
     return bad(`unknown kind '${kind}'`);
   }
 
-  try {
-    // For a not-yet-backfilled term the subject menu (derived from sections)
-    // would be empty — lazily enumerate its subjects from Banner so the dropdown
-    // is usable (a no-op for backfilled terms / when DYNAMIC_SYNC=0).
-    if (kind === "subject") await ensureTermSubjects(getDb(), term);
-
-    const options = await fetchFilterOptions(term, kind as FilterKind, campus);
-    return new Response(JSON.stringify({ kind, options }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    console.error("Filter options failed:", err);
-    return bad("Failed to fetch filter options", 500);
-  }
+  // Menus for a backfilled term only change on (re)sync, so they're edge-cached
+  // under the sync-versioned key. Dynamic terms stay uncached so the lazy
+  // subject enumeration above keeps reaching D1/Banner.
+  const meta = await fetchTermSyncMeta(term);
+  const profile = termCacheProfile(meta);
+  const produce = () => handleFilters(term, kind as FilterKind, campus);
+  return profile ? withEdgeCache(request, profile, produce) : produce();
 };

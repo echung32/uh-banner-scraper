@@ -8,8 +8,10 @@ import {
   fetchSectionByCrn,
   fetchTermSyncMeta,
 } from "@/lib/search";
+import type { TermSyncMeta } from "@/lib/db/queries";
 import { ensureSearchPage } from "@/lib/ingest/pageCache";
 import { ensureSectionByCrn } from "@/lib/ingest/crnLazy";
+import { termCacheProfile, withEdgeCache } from "@/lib/edgeCache";
 import { logDb } from "@/lib/log";
 import type { CourseSection, SearchParams, SearchResultsResponse } from "@/lib/sis/types";
 
@@ -27,18 +29,15 @@ function crnResponse(section: CourseSection | null): SearchResultsResponse {
   };
 }
 
-export const GET: APIRoute = async ({ request }) => {
+/** The uncached search handler — every D1/Banner touch happens in here. */
+async function handleSearch(
+  request: Request,
+  term: string,
+  meta: TermSyncMeta | null
+): Promise<Response> {
   const url = new URL(request.url);
-  const term = url.searchParams.get("term");
   // Subject is optional — empty means "all subjects" (search across everything).
   const subject = (url.searchParams.get("subject") ?? "").trim().toUpperCase();
-
-  if (!term) {
-    return new Response(JSON.stringify({ error: "term is required" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
 
   // CRN search is a distinct mode: a CRN identifies exactly one section within a
   // term (it's unique only per-term — see docs), so it ignores every other filter
@@ -99,11 +98,8 @@ export const GET: APIRoute = async ({ request }) => {
     // UI can offer the per-window age grid. Unknown terms get nothing.
     if (viaPageCache) {
       results.coverage = await fetchCoverageSummary(params, results.totalCount);
-    } else if (results.totalCount > 0) {
-      const meta = await fetchTermSyncMeta(params.term);
-      if (meta?.lastSyncedAt != null) {
-        results.coverage = fetchBackfillCoverageSummary(params, results.totalCount, meta);
-      }
+    } else if (results.totalCount > 0 && meta?.lastSyncedAt != null) {
+      results.coverage = fetchBackfillCoverageSummary(params, results.totalCount, meta);
     }
     logDb(
       `search ${params.term}/${params.subject || "*"} page ${params.pageOffset}+${params.pageMaxSize}` +
@@ -121,4 +117,25 @@ export const GET: APIRoute = async ({ request }) => {
       { status: 500, headers: { "Content-Type": "application/json" } }
     );
   }
+}
+
+export const GET: APIRoute = async ({ request }) => {
+  const url = new URL(request.url);
+  const term = url.searchParams.get("term");
+
+  if (!term) {
+    return new Response(JSON.stringify({ error: "term is required" }), {
+      status: 400,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+
+  // Backfilled terms are fully in D1 and their responses are pure functions of
+  // the sync state, so they're edge-cached under a key versioned by the sync
+  // timestamps. Dynamic/unknown terms get null back and stay uncached — their
+  // reads fill D1 (page cache / crnLazy) and must keep reaching it.
+  const meta = await fetchTermSyncMeta(term);
+  const profile = termCacheProfile(meta);
+  const produce = () => handleSearch(request, term, meta);
+  return profile ? withEdgeCache(request, profile, produce) : produce();
 };

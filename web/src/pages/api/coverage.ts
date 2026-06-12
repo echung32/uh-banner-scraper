@@ -4,6 +4,7 @@ import {
   fetchCoverageDetail,
   fetchTermSyncMeta,
 } from "@/lib/search";
+import { termCacheProfile, withEdgeCache } from "@/lib/edgeCache";
 import type { SearchParams } from "@/lib/sis/types";
 
 /**
@@ -40,21 +41,30 @@ export const GET: APIRoute = async ({ request }) => {
     sortDirection: url.searchParams.get("sortDirection") ?? "asc",
   };
 
-  try {
-    const meta = await fetchTermSyncMeta(term);
-    const coverage =
-      meta?.lastSyncedAt != null
-        ? await fetchBackfillCoverageDetail(params, meta)
-        : await fetchCoverageDetail(params);
-    return new Response(JSON.stringify(coverage), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (err) {
-    console.error("Coverage lookup failed:", err);
-    return new Response(JSON.stringify({ error: "Failed to fetch coverage" }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
-  }
+  const meta = await fetchTermSyncMeta(term);
+  const produce = async (): Promise<Response> => {
+    try {
+      const coverage =
+        meta?.lastSyncedAt != null
+          ? await fetchBackfillCoverageDetail(params, meta)
+          : await fetchCoverageDetail(params);
+      return new Response(JSON.stringify(coverage), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    } catch (err) {
+      console.error("Coverage lookup failed:", err);
+      return new Response(JSON.stringify({ error: "Failed to fetch coverage" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      });
+    }
+  };
+
+  // The backfilled flavor numbers every filtered row (a term-wide window scan),
+  // so it's the single most expensive read query — and it's a pure function of
+  // the sync state, so the sync-versioned edge cache fits it exactly. The
+  // dynamic flavor reflects live page-cache coverage and stays uncached.
+  const profile = termCacheProfile(meta);
+  return profile ? withEdgeCache(request, profile, produce) : produce();
 };
