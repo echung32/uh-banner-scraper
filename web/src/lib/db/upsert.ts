@@ -524,13 +524,23 @@ export async function markTermSynced(
     .prepare("SELECT COUNT(*) AS n FROM course_section WHERE term = ?")
     .bind(term)
     .first<{ n: number }>();
+  // Only advance last_synced_at on a fully-`ok` run. A `partial`/`error` run was
+  // throttled mid-term (missing its tail subjects), so stamping last_synced_at
+  // would mark the term backfilled and lock it onto the read path's SQL branch
+  // (gated on `last_synced_at IS NULL`) with a partial section set that never
+  // self-heals. Leaving it unchanged keeps a never-synced term NULL (re-queued
+  // for a clean retry / served by the dynamic page cache) and preserves a
+  // previously-`ok` term's timestamp if a later re-sync happens to go partial.
+  // last_sync_status + section_count are still recorded for observability.
   await db
     .prepare(
-      `UPDATE term SET last_synced_at = ?, last_sync_status = ?, section_count = ?,
+      `UPDATE term SET
+         last_synced_at = CASE WHEN ? = 'ok' THEN ? ELSE last_synced_at END,
+         last_sync_status = ?, section_count = ?,
          seeded = CASE WHEN is_view_only = 1 AND ? = 'ok' THEN 1 ELSE seeded END
        WHERE code = ?`
     )
-    .bind(syncedAt, status, count?.n ?? 0, status, term)
+    .bind(status, syncedAt, status, count?.n ?? 0, status, term)
     .run();
 }
 
