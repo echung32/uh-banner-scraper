@@ -59,17 +59,18 @@ catalog at `--no-text`** (`sync-details`). Deferred / lazy:
 | Spring 2026 Extension | `202633` | yes | ✅ 2026-06-11 |
 
 All 100 Banner terms exist in the `term` table (descriptions + view-only flags), populated
-[2026-06-10](2026-06-10.md); only the terms marked ✅ above have a full section backfill
-(the "empty term" ones returned 0 sections but are marked synced so they serve from the SQL
-path). Everything else fills in on demand via the page cache.
+[2026-06-10](2026-06-10.md). The terms marked ✅ above had a full section + details (catalog)
+backfill; **every other term now has a sections-only backfill** (see the historical sweep
+below). **All 100 terms are now backfilled — 0 unsynced — so every search serves from the
+SQL path; the dynamic page cache no longer fires for any term.**
 
-**Historical sweep (sections only):** on [2026-06-11](2026-06-11.md) a bulk newest→oldest
-sweep also backfilled **sections** (no catalog/details pass) for the **2024–2025** terms —
-Fall 2025 → Fall 2024 plus their Summer/Spring/Extension/Apprenticeship variants (15 terms,
-~31k sections) — before Banner throttled on **Spring 2024 (`202430`, partial — reset to
-unsynced for a clean re-run)**. **77 terms remain** (Spring 2024 and older, to Fall 2015 `201610`); re-run
-`web/scripts/backfill-sweep.sh` after a cooldown to continue. These have **sections but no
-catalog facts** (college/department) until a later details pass.
+**Historical sweep (sections only) — COMPLETE.** On [2026-06-11](2026-06-11.md) a bulk
+newest→oldest sweep backfilled **sections** (no catalog/details pass) for **every remaining
+term**, Fall 2025 → Fall 2015. It ran in two parts: the first stopped when Banner throttled
+on Spring 2024 (`202430`, partial — reset to unsynced); after a cooldown the resumed sweep
+ran **all 77 remaining terms clean (~184k sections, zero throttling)**, including a clean
+`202430` re-run. These have **sections but no catalog facts** (college/department) until a
+later `sync-details` pass — that's the only remaining backfill work.
 
 ## Operational learnings
 

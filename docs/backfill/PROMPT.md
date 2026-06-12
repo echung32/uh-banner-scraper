@@ -1,15 +1,4 @@
-# Reusable backfill request prompt
-
-Paste the block below into a new session (edit the **Terms** line), or just say
-*"run the backfill prompt for &lt;terms&gt;"* and point me at this file. It tells me how to
-resolve codes, run the passes, verify, and log — the same procedure used on 2026-06-11.
-
----
-
-```
-Please backfill these UH Banner terms into the remote D1 store, one at a time:
-
-Terms: <e.g. Fall 2027, Summer 2027 Extension, Spring 2027 Apprenticeship>
+Please backfill these UH Banner terms into the remote D1 store, through the list of terms one by one, from newest term to oldest term, until you either hit rate limit or I ask you to stop.
 
 Follow docs/backfill/summary.md. Specifically:
 
@@ -29,9 +18,6 @@ Follow docs/backfill/summary.md. Specifically:
    sections, filter options, catalog courses, status + notes), and update the term-code
    table's "Backfilled" column in docs/backfill/summary.md (add the new log to its Index).
 6. Commit the docs + backfill record on a branch (don't touch unrelated working-tree changes).
-```
-
----
 
 ## Operator notes (for me, not the prompt)
 
