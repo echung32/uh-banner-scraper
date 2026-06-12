@@ -11,6 +11,12 @@
   // `process.env.*` (the app relies on this — see astro.config.mjs).
   "compatibility_flags": ["nodejs_compat", "nodejs_compat_populate_process_env"],
   "observability": { "enabled": true },
+  // Guardrail against runaway CPU cost: read requests are I/O-bound (D1 + edge
+  // cache; subrequest wait doesn't count as CPU time), so 20ms is comfortable
+  // headroom for SSR + JSON work. Only enforced on the deployed network (never
+  // in wrangler dev / e2e), with built-in tolerance for occasional overruns.
+  // The long-running ingestion never runs here (admin routes 501 in prod).
+  "limits": { "cpu_ms": 20 },
   // Served from the custom domain; the workers.dev URL is disabled, as are
   // per-deployment Preview URLs (no preview/PR deploys — branch builds are off too).
   "workers_dev": false,
