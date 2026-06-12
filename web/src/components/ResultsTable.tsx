@@ -39,7 +39,7 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 // Total columns including the leading expand toggle — kept in sync with the
 // header / skeleton / empty-state colSpans below.
-const COLUMN_COUNT = 12;
+const COLUMN_COUNT = 13;
 
 interface ResultsTableProps {
   results: SearchResultsResponse | null;
@@ -154,6 +154,28 @@ function SectionRow({ section }: { section: CourseSection }) {
         <span className={section.seatsAvailable > 0 ? "text-green-600 dark:text-green-400" : "text-red-500"}>
           {section.enrollment}/{section.maximumEnrollment}
         </span>
+      </TableCell>
+      <TableCell className="text-center text-sm">
+        {section.waitCapacity > 0 ? (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <span
+                className={`cursor-help ${
+                  section.waitAvailable > 0
+                    ? "text-green-600 dark:text-green-400"
+                    : "text-red-500"
+                }`}
+              >
+                {section.waitCount}/{section.waitCapacity}
+              </span>
+            </TooltipTrigger>
+            <TooltipContent>
+              {section.waitAvailable} waitlist seat{section.waitAvailable === 1 ? "" : "s"} available
+            </TooltipContent>
+          </Tooltip>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        )}
       </TableCell>
       <TableCell>
         {section.openSection ? (
@@ -308,6 +330,7 @@ export function ResultsTable({
               <TableHead>Days/Times</TableHead>
               <TableHead>Location</TableHead>
               <TableHead className="w-20 text-center">Enrolled</TableHead>
+              <TableHead className="w-20 text-center">Waitlist</TableHead>
               <TableHead className="w-20">Status</TableHead>
             </TableRow>
           </TableHeader>
