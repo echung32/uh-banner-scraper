@@ -553,6 +553,38 @@ export async function markTermSubjectsSynced(db: D1Like, term: string, at: numbe
   await db.prepare("UPDATE term SET subjects_synced_at = ? WHERE code = ?").bind(at, term).run();
 }
 
+/** Stamps a term's last FULL course-details pass (Tier B2 boundary). */
+export async function markDetailsSynced(
+  db: D1Like,
+  term: string,
+  syncedAt: number
+): Promise<void> {
+  await db
+    .prepare("UPDATE term SET last_details_synced_at = ? WHERE code = ?")
+    .bind(syncedAt, term)
+    .run();
+}
+
+/** Removes section_detail rows for CRNs that no longer exist in a term. */
+export async function deleteSectionDetails(
+  db: D1Like,
+  term: string,
+  crns: string[]
+): Promise<number> {
+  if (crns.length === 0) return 0;
+  let deleted = 0;
+  // Chunk to respect the remote-D1 ~100-param limit (see CLAUDE.md).
+  for (const part of chunk(crns, 90)) {
+    const placeholders = part.map(() => "?").join(",");
+    await db
+      .prepare(`DELETE FROM section_detail WHERE term = ? AND crn IN (${placeholders})`)
+      .bind(term, ...part)
+      .run();
+    deleted += part.length;
+  }
+  return deleted;
+}
+
 export interface SyncRunHandle {
   id: number;
 }
