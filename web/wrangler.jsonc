@@ -26,11 +26,6 @@
       "migrations_dir": "./migrations"
     }
   ],
-  // Runtime config readable via process.env (see compat flag above). SIS_BASE_URL
-  // is the live Banner host (only the lazy cache-on-miss paths call it). Feature
-  // flags default on; LOG_SOURCE off in prod. ADMIN_SECRET is a *secret*
-  // (`wrangler secret put ADMIN_SECRET`). INGEST_ON_WORKER is intentionally unset
-  // → admin ingestion routes return 501 in production (ingestion is Node-only).
   // Subrequest budget raised to cover Tier A full sync across multiple terms
   // (default Worker limit is 1000; each term can require ~200-400 subrequests).
   "limits": { "subrequests": 50000 },
