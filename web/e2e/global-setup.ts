@@ -182,7 +182,7 @@ export default function globalSetup() {
   }
 
   const term = db.prepare(
-    "INSERT INTO term (code, description, is_view_only, display_order, last_synced_at) VALUES (?, ?, 0, ?, ?)"
+    "INSERT INTO term (code, description, is_view_only, display_order, last_synced_at, last_details_synced_at) VALUES (?, ?, 0, ?, ?, ?)"
   );
   // 202710 has the higher display_order so it stays first / the default term for
   // the read-path tests. 202730 exists (no sections) so the ingestion test can
@@ -190,10 +190,15 @@ export default function globalSetup() {
   // backfilled (last_synced_at set) so read-path searches stay on the SQL path —
   // not the demand-driven page cache — even with DYNAMIC_SYNC on. 202740 is left
   // dynamic (last_synced_at NULL) for the page-cache ingestion test.
+  //
+  // 202730 also gets a fresh last_details_synced_at (same epoch as SYNCED) so
+  // the B1 scheduled-refresh test does NOT accidentally trigger the B2 full-pass
+  // (B2 fires only when now - last_details_synced_at > 7 days). The B2 test
+  // overrides `now` via ?now= to a timestamp 8 days ahead of SYNCED.
   const SYNCED = 1_700_000_000_000;
-  term.run("202710", "Fall 2026", 2, SYNCED);
-  term.run("202730", "Spring 2026", 1, SYNCED);
-  term.run("202740", "Summer 2026", 0, null);
+  term.run("202710", "Fall 2026", 2, SYNCED, null);
+  term.run("202730", "Spring 2026", 1, SYNCED, SYNCED);
+  term.run("202740", "Summer 2026", 0, null, null);
 
   const insert = db.prepare(
     `INSERT INTO course_section

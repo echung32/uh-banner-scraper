@@ -144,6 +144,42 @@ CATALOG.find((s) => s.courseReferenceNumber === "10005").faculty = [
   },
 ];
 
+// 6 ICS sections (2 are course number 111) + 3 MATH sections — phase 1 baseline.
+// Phase 2 differs: 10006 DROPPED, 10007 ADDED, 10003 has a changed title (structural),
+// 10001 has only seat/enrollment counts changed (NOT structural).
+const CATALOG_PHASE2 = [
+  // 10001: seat-only change (enrollment 30→35, seatsAvailable 10→5); all structural fields same.
+  { ...section("10001", "ICS", "111", "001", "Intro to Computer Science I"), maximumEnrollment: 40, enrollment: 35, seatsAvailable: 5 },
+  section("10002", "ICS", "111", "002", "Intro to Computer Science I"),
+  // 10003: structural change (course title differs).
+  section("10003", "ICS", "141", "001", "Foundations I Revised"),
+  section("10004", "ICS", "211", "001", "Intro to Computer Science II"),
+  section("10005", "ICS", "311", "001", "Algorithms"),
+  // 10006: DROPPED (was ICS 311 §002).
+  // 10007: ADDED (new section).
+  section("10007", "ICS", "321", "001", "Software Engineering"),
+  section("20001", "MATH", "241", "001", "Calculus I"),
+  section("20002", "MATH", "242", "001", "Calculus II"),
+  section("20003", "MATH", "243", "001", "Calculus III"),
+];
+
+// Preserve the faculty entry on 10005 in phase 2 as well.
+CATALOG_PHASE2.find((s) => s.courseReferenceNumber === "10005").faculty = [
+  {
+    bannerId: "9001",
+    category: "01",
+    courseReferenceNumber: "10005",
+    displayName: "Jane Instructor",
+    emailAddress: "jane@hawaii.edu",
+    primaryIndicator: true,
+    term: "",
+  },
+];
+
+// Active catalog phase (1 = CATALOG, 2 = CATALOG_PHASE2).
+let catalogPhase = 1;
+const activeCatalog = () => (catalogPhase === 1 ? CATALOG : CATALOG_PHASE2);
+
 // Per-session server-side state, keyed by JSESSIONID.
 // storedCriteria === null means "fresh form" (just reset or just initialized).
 const sessions = new Map();
@@ -186,6 +222,12 @@ const server = createServer(async (req, res) => {
 
   // Health check used by Playwright's webServer readiness probe.
   if (path === "/health") return sendJson(res, 200, { ok: true });
+
+  // Control endpoint: advance to catalog phase 2.
+  if (req.method === "POST" && path === "/__mock/advance") {
+    catalogPhase = 2;
+    return sendJson(res, 200, { ok: true, phase: catalogPhase });
+  }
 
   // Phase 1: termSelection — issue cookies + Token_A.
   if (path === "/ssb/term/termSelection") {
@@ -233,7 +275,7 @@ const server = createServer(async (req, res) => {
   if (path === "/ssb/searchResults/getClassDetails") {
     const body = await readBody(req);
     const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
-    const sec = CATALOG.find((s) => s.courseReferenceNumber === crn);
+    const sec = activeCatalog().find((s) => s.courseReferenceNumber === crn);
     if (!sec) {
       return sendHtml(res, 200, `<section aria-labelledby="classDetails">No section found.</section>`);
     }
@@ -255,7 +297,7 @@ const server = createServer(async (req, res) => {
   if (path === "/ssb/searchResults/getSectionCatalogDetails") {
     const body = await readBody(req);
     const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
-    const subject = CATALOG.find((s) => s.courseReferenceNumber === crn)?.subject ?? "ICS";
+    const subject = activeCatalog().find((s) => s.courseReferenceNumber === crn)?.subject ?? "ICS";
     return sendHtml(res, 200, catalogHtml(subject));
   }
 
@@ -267,7 +309,7 @@ const server = createServer(async (req, res) => {
   ) {
     const body = await readBody(req);
     const crn = new URLSearchParams(body).get("courseReferenceNumber") ?? "";
-    const sec = CATALOG.find((s) => s.courseReferenceNumber === crn);
+    const sec = activeCatalog().find((s) => s.courseReferenceNumber === crn);
     if (path.endsWith("getCourseDescription")) {
       return sendHtml(
         res,
@@ -433,7 +475,7 @@ const server = createServer(async (req, res) => {
     const term = url.searchParams.get("txt_term") ?? "202710";
     // An empty subject is a whole-term search (Banner returns every subject) —
     // this is what the demand-driven page cache uses for an "All Subjects" page.
-    const data = CATALOG.filter(
+    const data = activeCatalog().filter(
       (s) =>
         (!effective.subject || s.subject === effective.subject) &&
         (!effective.courseNumber || s.courseNumber === effective.courseNumber)
