@@ -191,13 +191,15 @@ export default function globalSetup() {
   // not the demand-driven page cache — even with DYNAMIC_SYNC on. 202740 is left
   // dynamic (last_synced_at NULL) for the page-cache ingestion test.
   //
-  // 202730 also gets a fresh last_details_synced_at (same epoch as SYNCED) so
-  // the B1 scheduled-refresh test does NOT accidentally trigger the B2 full-pass
-  // (B2 fires only when now - last_details_synced_at > 7 days). The B2 test
-  // overrides `now` via ?now= to a timestamp 8 days ahead of SYNCED.
+  // 202730 gets a RECENT last_details_synced_at (real Date.now() at setup) so
+  // the B1 scheduled-refresh test reads a fresh details stamp and does NOT
+  // trigger the Tier B2 full-pass — independent of other tests' ordering.
+  // The B2 test forces staleness explicitly via the refresh-run `now=` override
+  // (Date.now() + 8 days), which crosses the 7-day threshold regardless of
+  // when setup ran.
   const SYNCED = 1_700_000_000_000;
   term.run("202710", "Fall 2026", 2, SYNCED, null);
-  term.run("202730", "Spring 2026", 1, SYNCED, SYNCED);
+  term.run("202730", "Spring 2026", 1, SYNCED, Date.now());
   term.run("202740", "Summer 2026", 0, null, null);
 
   const insert = db.prepare(
