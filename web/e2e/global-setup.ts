@@ -182,7 +182,7 @@ export default function globalSetup() {
   }
 
   const term = db.prepare(
-    "INSERT INTO term (code, description, is_view_only, display_order, last_synced_at, last_details_synced_at) VALUES (?, ?, 0, ?, ?, ?)"
+    "INSERT INTO term (code, description, is_view_only, display_order, last_synced_at) VALUES (?, ?, 0, ?, ?)"
   );
   // 202710 has the higher display_order so it stays first / the default term for
   // the read-path tests. 202730 exists (no sections) so the ingestion test can
@@ -191,16 +191,13 @@ export default function globalSetup() {
   // not the demand-driven page cache — even with DYNAMIC_SYNC on. 202740 is left
   // dynamic (last_synced_at NULL) for the page-cache ingestion test.
   //
-  // 202730 gets a RECENT last_details_synced_at (real Date.now() at setup) so
-  // the B1 scheduled-refresh test reads a fresh details stamp and does NOT
-  // trigger the Tier B2 full-pass — independent of other tests' ordering.
-  // The B2 test forces staleness explicitly via the refresh-run `now=` override
-  // (Date.now() + 8 days), which crosses the 7-day threshold regardless of
-  // when setup ran.
+  // Tier B2 is now a rolling per-run refresh of the stalest detail CRNs (no
+  // last_details_synced_at gate), so the scheduled-refresh tests don't need a
+  // seeded details-stamp — every refresh-run rolls the term's stale details.
   const SYNCED = 1_700_000_000_000;
-  term.run("202710", "Fall 2026", 2, SYNCED, null);
-  term.run("202730", "Spring 2026", 1, SYNCED, Date.now());
-  term.run("202740", "Summer 2026", 0, null, null);
+  term.run("202710", "Fall 2026", 2, SYNCED);
+  term.run("202730", "Spring 2026", 1, SYNCED);
+  term.run("202740", "Summer 2026", 0, null);
 
   const insert = db.prepare(
     `INSERT INTO course_section
