@@ -43,6 +43,7 @@ import type { D1Like } from "@/lib/db/types";
 import { catalogFacetKind, deriveCatalogFacet } from "@/lib/db/queries";
 import {
   finishSyncRun,
+  markDetailsSynced,
   replaceFilterOptions,
   startSyncRun,
   upsertCourse,
@@ -109,6 +110,13 @@ export interface DetailsOptions {
   /** Delay between per-course / per-CRN / per-instructor fetches (ms). */
   courseDelayMs?: number;
   log?: (msg: string) => void;
+  /**
+   * Restrict the catalog / section-detail / instructor passes to these CRNs
+   * (Tier B1 diff-driven refresh). When set, the term-level filter-option pass
+   * is skipped and last_details_synced_at is NOT stamped (it's a partial pass).
+   * Undefined = full term pass (Tier B2), which stamps last_details_synced_at.
+   */
+  crns?: string[];
 }
 
 export interface DetailsResult {
@@ -189,22 +197,30 @@ async function syncCourseCatalog(
   term: string,
   delayMs: number,
   withText: boolean,
-  log: (m: string) => void
+  log: (m: string) => void,
+  crns?: string[]
 ): Promise<{ courses: number; status: "ok" | "partial"; session: SisSession }> {
   // One representative CRN per (campus, subject, course_number). Catalog facts
   // (college/department/description/prereqs) are campus-specific — the same
   // subject+course at a different campus is a different catalog entry — but
   // uniform within a campus, so one CRN per campus suffices. See the plan's
   // verification note.
+  let sql =
+    `SELECT campus_description AS campus, subject, course_number AS courseNumber,
+            MIN(crn) AS crn
+       FROM course_section WHERE term = ?`;
+  const binds: unknown[] = [term];
+  if (crns && crns.length > 0) {
+    sql += ` AND (campus_description, subject, course_number) IN (
+              SELECT campus_description, subject, course_number FROM course_section
+                WHERE term = ? AND crn IN (${crns.map(() => "?").join(",")}))`;
+    binds.push(term, ...crns);
+  }
+  sql += ` GROUP BY campus_description, subject, course_number
+           ORDER BY campus_description, subject, course_number`;
   const { results: courses } = await db
-    .prepare(
-      `SELECT campus_description AS campus, subject, course_number AS courseNumber,
-              MIN(crn) AS crn
-         FROM course_section WHERE term = ?
-         GROUP BY campus_description, subject, course_number
-         ORDER BY campus_description, subject, course_number`
-    )
-    .bind(term)
+    .prepare(sql)
+    .bind(...binds)
     .all<{ campus: string; subject: string; courseNumber: string; crn: string }>();
 
   let done = 0;
@@ -265,12 +281,17 @@ async function syncSectionDetails(
   session: SisSession,
   term: string,
   delayMs: number,
-  log: (m: string) => void
+  log: (m: string) => void,
+  crns?: string[]
 ): Promise<{ done: number; status: "ok" | "partial"; session: SisSession }> {
-  const { results: sections } = await db
-    .prepare("SELECT crn FROM course_section WHERE term = ? ORDER BY crn")
-    .bind(term)
-    .all<{ crn: string }>();
+  let sql = "SELECT crn FROM course_section WHERE term = ?";
+  const binds: unknown[] = [term];
+  if (crns && crns.length > 0) {
+    sql += ` AND crn IN (${crns.map(() => "?").join(",")})`;
+    binds.push(...crns);
+  }
+  sql += " ORDER BY crn";
+  const { results: sections } = await db.prepare(sql).bind(...binds).all<{ crn: string }>();
 
   let done = 0;
   let since = 0;
@@ -323,15 +344,19 @@ async function syncInstructors(
   session: SisSession,
   term: string,
   delayMs: number,
-  log: (m: string) => void
+  log: (m: string) => void,
+  crns?: string[]
 ): Promise<{ done: number; status: "ok" | "partial"; session: SisSession }> {
-  const { results: ids } = await db
-    .prepare(
-      "SELECT DISTINCT banner_id FROM section_faculty WHERE term = ?"
-        + " AND banner_id IS NOT NULL AND banner_id <> '' ORDER BY banner_id"
-    )
-    .bind(term)
-    .all<{ banner_id: string }>();
+  let sql =
+    "SELECT DISTINCT banner_id FROM section_faculty WHERE term = ?"
+    + " AND banner_id IS NOT NULL AND banner_id <> ''";
+  const binds: unknown[] = [term];
+  if (crns && crns.length > 0) {
+    sql += ` AND crn IN (${crns.map(() => "?").join(",")})`;
+    binds.push(...crns);
+  }
+  sql += " ORDER BY banner_id";
+  const { results: ids } = await db.prepare(sql).bind(...binds).all<{ banner_id: string }>();
 
   let done = 0;
   let since = 0;
@@ -361,7 +386,8 @@ export async function syncDetails(
   options: DetailsOptions = {}
 ): Promise<DetailsResult> {
   const log = options.log ?? (() => {});
-  const doFilters = options.filters ?? true;
+  const scoped = options.crns !== undefined;
+  const doFilters = options.filters ?? !scoped;
   const doCatalog = options.catalog ?? true;
   const doSections = options.sections ?? true;
   const doInstructors = options.instructors ?? true;
@@ -387,7 +413,7 @@ export async function syncDetails(
       if (f.status === "partial") status = "partial";
     }
     if (doCatalog) {
-      const c = await syncCourseCatalog(db, session, term, delay, withText, log);
+      const c = await syncCourseCatalog(db, session, term, delay, withText, log, options.crns);
       courses = c.courses;
       session = c.session;
       if (c.status === "partial") status = "partial";
@@ -396,18 +422,21 @@ export async function syncDetails(
       await materializeCatalogFacets(db, term, log);
     }
     if (doSections) {
-      const sd = await syncSectionDetails(db, session, term, delay, log);
+      const sd = await syncSectionDetails(db, session, term, delay, log, options.crns);
       sectionDetails = sd.done;
       session = sd.session;
       if (sd.status === "partial") status = "partial";
     }
     if (doInstructors) {
-      const ins = await syncInstructors(db, session, term, delay, log);
+      const ins = await syncInstructors(db, session, term, delay, log, options.crns);
       instructors = ins.done;
       session = ins.session;
       if (ins.status === "partial") status = "partial";
     }
 
+    if (!scoped && status !== "error") {
+      await markDetailsSynced(db, term, Date.now());
+    }
     await finishSyncRun(db, run, {
       finishedAt: Date.now(),
       status,
