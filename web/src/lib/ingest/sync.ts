@@ -2,7 +2,8 @@
  * Full catalog sync — the primary Banner-facing write path.
  *
  * For a term: handshake once, enumerate subjects, paginate every subject's
- * sections, and delete-and-replace them per subject in D1. This is the only
+ * sections, and delta-write them per subject in D1 (new=insert, dropped=delete,
+ * structural=rewrite, seat-only=row UPDATE, unchanged=skip). This is the only
  * place (besides seat refresh / term refresh) that touches the live Banner API.
  */
 import {
@@ -13,14 +14,19 @@ import {
 import type { CourseSection, SisSession } from "@/lib/sis/types";
 import type { D1Like } from "@/lib/db/types";
 import {
+  deleteSectionsAndChildren,
   finishSyncRun,
+  insertSectionsAndChildren,
   markTermSynced,
-  replaceSubjectSections,
   startSyncRun,
+  updateSectionRows,
   upsertSubjects,
 } from "@/lib/db/upsert";
-import { rowToCourseSection } from "@/lib/db/mappers";
-import { classifySectionChanges, type SectionDiff } from "@/lib/ingest/diff";
+import {
+  classifyForWrite,
+  type SectionDiff,
+  type SectionWriteDelta,
+} from "@/lib/ingest/diff";
 
 const PAGE_SIZE = 500;
 const SESSION_MAX_AGE_MS = 27 * 60 * 1000; // re-handshake before the ~30-min server expiry
@@ -47,17 +53,20 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** Current stored sections for one (term, subject) — used to diff a re-sync. */
-async function readSubjectSections(
+/**
+ * Reads the stored CRNs + raw_json strings for one (term, subject) — the
+ * minimal read needed to classify incoming sections for a delta write.
+ */
+async function readSubjectRawJson(
   db: D1Like,
   term: string,
   subject: string
-): Promise<CourseSection[]> {
+): Promise<Array<{ crn: string; rawJson: string }>> {
   const { results } = await db
-    .prepare("SELECT raw_json FROM course_section WHERE term = ? AND subject = ?")
+    .prepare("SELECT crn, raw_json FROM course_section WHERE term = ? AND subject = ?")
     .bind(term, subject)
-    .all<{ raw_json: string }>();
-  return results.map(rowToCourseSection);
+    .all<{ crn: string; raw_json: string }>();
+  return results.map((r) => ({ crn: r.crn, rawJson: r.raw_json }));
 }
 
 /** Pulls every section for one (term, subject) across all result pages. */
@@ -82,13 +91,24 @@ export async function fetchAllSections(
   return all;
 }
 
+export interface SyncWrites {
+  inserted: number;
+  structural: number;
+  seatUpdated: number;
+  deleted: number;
+  unchanged: number;
+}
+
 export interface SyncResult {
   term: string;
   subjects: number;
+  /** Total number of sections in the term (= sum of incoming sections per subject). */
   sections: number;
   status: "ok" | "partial" | "error";
   /** Present only when collectDiff was set; aggregated across all subjects. */
   diff?: SectionDiff;
+  /** Write-delta totals across all subjects — always present. */
+  writes?: SyncWrites;
 }
 
 /** Full sync of a single term. */
@@ -102,10 +122,12 @@ export async function syncTerm(
   const perSession = options.subjectsPerSession ?? DEFAULT_SUBJECTS_PER_SESSION;
   const collectDiff = options.collectDiff ?? false;
   const diff: SectionDiff = { newCrns: [], droppedCrns: [], structuralCrns: [] };
+  const writes: SyncWrites = { inserted: 0, structural: 0, seatUpdated: 0, deleted: 0, unchanged: 0 };
   const startedAt = Date.now();
   const run = await startSyncRun(db, termCode, "full", startedAt);
 
   let session = await establishSession(termCode);
+  // totalSections accumulates incoming section counts (= term size, not write count).
   let totalSections = 0;
   let subjectsDone = 0;
   let sinceHandshake = 0;
@@ -128,7 +150,8 @@ export async function syncTerm(
       // eventually gets throttled by Banner — the failures cluster in the tail —
       // and a fresh handshake clears it. Without this, late subjects (incl. big
       // ones like SOC/SPAN) silently come back empty and the run is "partial".
-      let written: number | null = null;
+      let subjectDelta: SectionWriteDelta | null = null;
+      let subjectCount: number | null = null;
       let lastErr: Error | null = null;
       for (let attempt = 0; attempt < SUBJECT_MAX_ATTEMPTS; attempt++) {
         try {
@@ -139,31 +162,61 @@ export async function syncTerm(
             session = await establishSession(termCode);
           }
           const sections = await fetchAllSections(session, termCode, subject.code);
-          if (collectDiff) {
-            const existing = await readSubjectSections(db, termCode, subject.code);
-            const d = classifySectionChanges(existing, sections);
-            diff.newCrns.push(...d.newCrns);
-            diff.droppedCrns.push(...d.droppedCrns);
-            diff.structuralCrns.push(...d.structuralCrns);
+          // Always read existing raw_json strings — the delta classifier needs them
+          // regardless of collectDiff (the whole point is trading reads for writes).
+          const existing = await readSubjectRawJson(db, termCode, subject.code);
+          const delta = classifyForWrite(existing, sections);
+          const now = Date.now();
+
+          // 1. Delete dropped CRNs.
+          await deleteSectionsAndChildren(db, termCode, delta.droppedCrns);
+          // 2. Structurally-changed: delete old row+children, then re-insert.
+          if (delta.structuralSections.length > 0) {
+            await deleteSectionsAndChildren(
+              db,
+              termCode,
+              delta.structuralSections.map((s) => s.courseReferenceNumber)
+            );
           }
-          written = await replaceSubjectSections(
+          // 3. Insert new + structural sections (with their children).
+          await insertSectionsAndChildren(
             db,
-            termCode,
-            subject.code,
-            sections,
-            Date.now()
+            [...delta.newSections, ...delta.structuralSections],
+            now
           );
+          // 4. Seat-only: UPDATE the section row only (no child table writes).
+          await updateSectionRows(db, delta.seatOnlySections, now);
+
+          subjectDelta = delta;
+          subjectCount = sections.length;
           break;
         } catch (err) {
           lastErr = err as Error;
         }
       }
-      if (written === null) {
+      if (subjectDelta === null || subjectCount === null) {
         status = "partial";
         log(`[${termCode}] ${subject.code} FAILED: ${lastErr?.message}`);
       } else {
-        totalSections += written;
-        log(`[${termCode}] ${subject.code}: ${written} sections`);
+        // Accumulate term size (incoming count) so SyncResult.sections = term's
+        // total section count, not the write count.
+        totalSections += subjectCount;
+        const written =
+          subjectDelta.newSections.length +
+          subjectDelta.structuralSections.length +
+          subjectDelta.seatOnlySections.length;
+        writes.inserted += subjectDelta.newSections.length;
+        writes.structural += subjectDelta.structuralSections.length;
+        writes.seatUpdated += subjectDelta.seatOnlySections.length;
+        writes.deleted += subjectDelta.droppedCrns.length;
+        writes.unchanged += subjectDelta.unchangedCrns.length;
+        log(`[${termCode}] ${subject.code}: ${subjectCount} sections (${written} written, ${subjectDelta.unchangedCrns.length} unchanged)`);
+        if (collectDiff) {
+          // classifyForWrite gives us new/dropped/structural directly.
+          diff.newCrns.push(...subjectDelta.newSections.map((s) => s.courseReferenceNumber));
+          diff.droppedCrns.push(...subjectDelta.droppedCrns);
+          diff.structuralCrns.push(...subjectDelta.structuralSections.map((s) => s.courseReferenceNumber));
+        }
       }
       subjectsDone += 1;
       if (delay > 0) await sleep(delay);
@@ -194,6 +247,7 @@ export async function syncTerm(
     subjects: subjectsDone,
     sections: totalSections,
     status,
+    writes,
     ...(collectDiff ? { diff } : {}),
   };
 }

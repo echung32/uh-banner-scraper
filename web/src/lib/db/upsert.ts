@@ -67,23 +67,15 @@ const MEETING_COLUMNS: (keyof MeetingRow)[] = [
 ];
 
 /**
- * Delete-and-replace all sections for one `(term, subject)`. Child rows are
- * deleted explicitly (not relying on FK cascade, which D1/local differ on).
- * Returns the number of sections written.
+ * Inserts section rows + their child faculty/meeting rows for the given sections.
+ * No deletes — caller is responsible for pre-clearing any rows that must be
+ * replaced. Returns the number of section rows inserted.
  */
-export async function replaceSubjectSections(
+export async function insertSectionsAndChildren(
   db: D1Like,
-  term: string,
-  subject: string,
   sections: CourseSection[],
   syncedAt: number
 ): Promise<number> {
-  await db.batch([
-    db.prepare("DELETE FROM section_faculty WHERE term = ? AND crn IN (SELECT crn FROM course_section WHERE term = ? AND subject = ?)").bind(term, term, subject),
-    db.prepare("DELETE FROM section_meeting WHERE term = ? AND crn IN (SELECT crn FROM course_section WHERE term = ? AND subject = ?)").bind(term, term, subject),
-    db.prepare("DELETE FROM course_section WHERE term = ? AND subject = ?").bind(term, subject),
-  ]);
-
   if (sections.length === 0) return 0;
 
   const sectionRows = sections.map((s) => sectionToRow(s, syncedAt));
@@ -101,6 +93,94 @@ export async function replaceSubjectSections(
   }
 
   return sectionRows.length;
+}
+
+/**
+ * Deletes section rows + their child faculty/meeting rows for the given CRNs in
+ * the given term. Child rows are deleted explicitly (not relying on FK cascade,
+ * which D1/local differ on). Chunked to ≤90 CRNs per IN-list so total binds
+ * (term + 90 crns = 91) stay under the remote-D1 100-param cap. Returns the
+ * number of section rows deleted. No-op on empty crns.
+ */
+export async function deleteSectionsAndChildren(
+  db: D1Like,
+  term: string,
+  crns: string[]
+): Promise<number> {
+  if (crns.length === 0) return 0;
+  let deleted = 0;
+  for (const part of chunk(crns, 90)) {
+    const inList = part.map(() => "?").join(",");
+    await db.batch([
+      db
+        .prepare(`DELETE FROM section_faculty WHERE term = ? AND crn IN (${inList})`)
+        .bind(term, ...part),
+      db
+        .prepare(`DELETE FROM section_meeting WHERE term = ? AND crn IN (${inList})`)
+        .bind(term, ...part),
+      db
+        .prepare(`DELETE FROM course_section WHERE term = ? AND crn IN (${inList})`)
+        .bind(term, ...part),
+    ]);
+    deleted += part.length;
+  }
+  return deleted;
+}
+
+/**
+ * Full-row UPDATE of `course_section` for sections whose non-structural (seat)
+ * fields changed. Updates every non-PK column including raw_json and synced_at,
+ * but does NOT touch section_faculty or section_meeting (those are unchanged).
+ * Modelled on updateSeats but sets ALL non-PK columns. Returns the number of
+ * rows updated.
+ */
+export async function updateSectionRows(
+  db: D1Like,
+  sections: CourseSection[],
+  syncedAt: number
+): Promise<number> {
+  if (sections.length === 0) return 0;
+  const statements = sections.map((s) => {
+    const r = sectionToRow(s, syncedAt);
+    return db
+      .prepare(
+        `UPDATE course_section SET
+           subject_description = ?, course_number = ?, sequence_number = ?,
+           subject_course = ?, course_title = ?, campus_description = ?,
+           schedule_type_desc = ?, credit_hours = ?, credit_hour_low = ?,
+           credit_hour_high = ?, maximum_enrollment = ?, enrollment = ?,
+           seats_available = ?, wait_capacity = ?, wait_count = ?,
+           wait_available = ?, open_section = ?, part_of_term = ?,
+           raw_json = ?, synced_at = ?
+         WHERE term = ? AND crn = ?`
+      )
+      .bind(
+        r.subject_description,
+        r.course_number,
+        r.sequence_number,
+        r.subject_course,
+        r.course_title,
+        r.campus_description,
+        r.schedule_type_desc,
+        r.credit_hours,
+        r.credit_hour_low,
+        r.credit_hour_high,
+        r.maximum_enrollment,
+        r.enrollment,
+        r.seats_available,
+        r.wait_capacity,
+        r.wait_count,
+        r.wait_available,
+        r.open_section,
+        r.part_of_term,
+        r.raw_json,
+        r.synced_at,
+        r.term,
+        r.crn
+      );
+  });
+  await db.batch(statements);
+  return sections.length;
 }
 
 // Every section column except the (term, crn) primary key — the ON CONFLICT
@@ -130,10 +210,10 @@ function upsertSectionStatement(
 /**
  * Idempotent upsert of sections keyed by (term, crn) — used by the demand-driven
  * page cache (lib/ingest/pageCache), where the same CRN can re-appear across
- * pages or filters. Unlike replaceSubjectSections there is NO subject-scoped
- * delete (and so no empty window): each row is inserted-or-updated in place, and
- * child faculty/meeting rows are refreshed per CRN. All sections must belong to
- * one term. Returns the number of sections written.
+ * pages or filters. There is NO subject-scoped delete (and so no empty window):
+ * each row is inserted-or-updated in place, and child faculty/meeting rows are
+ * refreshed per CRN. All sections must belong to one term. Returns the number of
+ * sections written.
  */
 export async function upsertSections(
   db: D1Like,

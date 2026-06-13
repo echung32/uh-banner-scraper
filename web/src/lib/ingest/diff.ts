@@ -11,6 +11,65 @@
  */
 import type { CourseSection } from "@/lib/sis/types";
 
+export interface SectionWriteDelta {
+  /** new CRNs — insert section + children. */
+  newSections: CourseSection[];
+  /** structural changes — rewrite section row + children. */
+  structuralSections: CourseSection[];
+  /** changed but only in non-structural (seat) fields — UPDATE the section row only. */
+  seatOnlySections: CourseSection[];
+  /** CRNs present in stored but absent from incoming — delete. */
+  droppedCrns: string[];
+  /** CRNs whose serialized form is byte-identical — skip entirely. */
+  unchangedCrns: string[];
+}
+
+/**
+ * Classifies incoming sections against the stored rows (by raw_json string) for a
+ * minimal-write sync: only new/changed rows are written, unchanged rows are skipped,
+ * and seat-only changes update the section row without rewriting child rows.
+ * `existing` carries each stored CRN's exact raw_json string (= JSON.stringify at
+ * write time), so equality with JSON.stringify(incoming) is an exact change test.
+ */
+export function classifyForWrite(
+  existing: Array<{ crn: string; rawJson: string }>,
+  incoming: CourseSection[]
+): SectionWriteDelta {
+  const existingByCrn = new Map(existing.map((e) => [e.crn, e.rawJson]));
+  const incomingCrns = new Set(incoming.map((s) => s.courseReferenceNumber));
+
+  const newSections: CourseSection[] = [];
+  const structuralSections: CourseSection[] = [];
+  const seatOnlySections: CourseSection[] = [];
+  const unchangedCrns: string[] = [];
+
+  for (const s of incoming) {
+    const stored = existingByCrn.get(s.courseReferenceNumber);
+    if (stored === undefined) {
+      newSections.push(s);
+      continue;
+    }
+    if (JSON.stringify(s) === stored) {
+      unchangedCrns.push(s.courseReferenceNumber);
+      continue;
+    }
+    // Changed: structural vs seat-only. Reparse the stored row to fingerprint it.
+    const prev = JSON.parse(stored) as CourseSection;
+    if (structuralFingerprint(prev) !== structuralFingerprint(s)) {
+      structuralSections.push(s);
+    } else {
+      seatOnlySections.push(s);
+    }
+  }
+
+  const droppedCrns: string[] = [];
+  for (const e of existing) {
+    if (!incomingCrns.has(e.crn)) droppedCrns.push(e.crn);
+  }
+
+  return { newSections, structuralSections, seatOnlySections, droppedCrns, unchangedCrns };
+}
+
 export interface SectionDiff {
   newCrns: string[];
   droppedCrns: string[];
