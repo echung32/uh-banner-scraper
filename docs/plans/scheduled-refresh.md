@@ -101,10 +101,11 @@ Per hourly run:
 
 1. **`refreshTerms`** (~1–2 requests) — recompute `is_view_only` and pick up new terms, so terms
    that flipped to view-only drop out of the sweep and new ones join.
-2. **For each mutable term — Tier A full sync**, chunked as one `step.do()` per subject for
-   resumability and per-chunk retry, with `step.sleep` pacing between chunks and the existing
-   session-rotation budget preserved. The diff (B1) is computed inside this write path and its
-   new/dropped/structurally-changed CRN sets are emitted.
+2. **For each mutable term — Tier A full sync** as one `step.do()` per term (term-level
+   resumability + retry; a single step keeps the in-memory SIS session/rotation in `syncTerm`
+   intact, since a session can't cross step boundaries), with `step.sleep` pacing between terms.
+   The diff (B1) is computed inside this write path and its new/dropped/structurally-changed CRN
+   sets are emitted.
 3. **Tier B B1** — fetch/delete/re-fetch details for the CRN sets from step 2.
 4. **Tier B B2** — for each mutable term whose `last_details_synced_at` is >7 days old (staggered),
    run the full `syncDetails` pass.
