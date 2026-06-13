@@ -41,7 +41,9 @@ const RETRY_BACKOFF_MS = 2000; // wait before a re-handshake so we don't amplify
 // Banner silently throttles a session after a few hundred requests (each subject
 // is ~2: resetDataForm + searchResults), so rotate to a fresh session well before
 // that. Rotating too often re-triggers handshake throttling, so keep it modest.
-const DEFAULT_SUBJECTS_PER_SESSION = 40;
+// Exported so the RefreshWorkflow sizes its per-batch step to the same cadence
+// (one batch = one session's worth of subjects) — single source of truth.
+export const DEFAULT_SUBJECTS_PER_SESSION = 40;
 
 export interface SyncOptions {
   /** Delay between subjects (ms). Higher = gentler on Banner during backfill. */

@@ -2,7 +2,11 @@
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";
 import { getDb } from "@/lib/db/binding";
 import { refreshTerms } from "@/lib/ingest/terms";
-import { enumerateSyncSubjects, syncSubjectBatch } from "@/lib/ingest/sync";
+import {
+  DEFAULT_SUBJECTS_PER_SESSION,
+  enumerateSyncSubjects,
+  syncSubjectBatch,
+} from "@/lib/ingest/sync";
 import { refreshTermDetails } from "@/lib/ingest/refresh";
 import { markTermSynced } from "@/lib/db/upsert";
 import type { SectionDiff } from "@/lib/ingest/diff";
@@ -28,6 +32,16 @@ import type { SectionDiff } from "@/lib/ingest/diff";
  * Why bounded: a batch covers exactly one session's worth of subjects (~40). B1 is
  * bounded by structural/new CRNs; B2 is capped by the rolling-detail constant. No
  * step can blow the 10-min limit regardless of term size.
+ *
+ * Two deliberate scope notes:
+ *   - Cold start: a never-backfilled term classifies every section as "new", so its
+ *     one-time B1 details step can be large. In practice mutable terms are backfilled
+ *     out-of-band (admin sync / sync-details) before the hourly sweep ever sees them,
+ *     so the steady-state B1 diff is small; the 10-min step timeout is the backstop.
+ *   - sync_run bookkeeping: unlike the CLI/admin syncTerm path, the bounded Workflow
+ *     does not open/close a sync_run row (a run would span ~100 steps with retries in
+ *     between). term.last_synced_at (set by markTermSynced in the finalize step) is the
+ *     freshness signal for Workflow-driven runs.
  */
 
 const STEP_OPTS = {
@@ -35,7 +49,9 @@ const STEP_OPTS = {
   timeout: "10 minutes",
 } as const;
 
-const SUBJECTS_PER_BATCH = 40;
+// One batch = one SIS session's worth of subjects; single-sourced from sync.ts so
+// the Workflow's batch size can't silently diverge from syncTerm's session cadence.
+const SUBJECTS_PER_BATCH = DEFAULT_SUBJECTS_PER_SESSION;
 
 function chunk<T>(a: T[], n: number): T[][] {
   const out: T[][] = [];
