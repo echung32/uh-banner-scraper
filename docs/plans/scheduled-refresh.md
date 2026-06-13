@@ -9,6 +9,7 @@ Status: **shipped**.
 - Manual entry points: `POST /api/admin/refresh-run` (secret-guarded) and `yarn ingest refresh-run [--term 202710] [--delayMs 200]`.
 - Section-core diff classifier in `web/src/lib/ingest/diff.ts` (new/dropped/structural CRNs; seat fields excluded).
 - Migration `0008` (`web/migrations/0008_term_details_synced.sql`) adds `term.last_details_synced_at` (the Tier B2 staleness marker).
+- **Content-aware delta write** (`web/src/lib/ingest/diff.ts` `classifyForWrite` + `web/src/lib/db/upsert.ts` writers): Tier A writes only new/changed/dropped sections — seat-only changes UPDATE the row without rewriting child rows; unchanged sections are skipped — cutting D1 writes on the hourly sweep. Per-row `synced_at` becomes last-modified; `term.last_synced_at` remains last-verified.
 
 ## Problem
 
@@ -121,7 +122,10 @@ platform constraint.
   surfaces details freshness; the column does not exist today).
 - Diffing needs the pre-replace section set. The sync already reads and writes per `(term, subject)`,
   so the diff is computed in that write path from the rows being replaced — no extra storage or
-  snapshot table required.
+  snapshot table required. (The write mechanism was subsequently optimized: rather than
+  delete-and-replace, `syncTerm` now runs a content-aware delta via `classifyForWrite` in
+  `diff.ts`, issuing only insert/update/delete statements for rows that actually changed — see the
+  "What shipped" bullet above.)
 
 ## Verification
 
