@@ -48,7 +48,7 @@ function relativeTime(epochMs: number): string {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/** Recency bucket for a backfill window, keyed on its oldest (stalest) write. */
+/** Recency bucket for an epoch-ms timestamp (used for the term's verified-fresh age). */
 type AgeBucket = "fresh" | "recent" | "stale" | "old";
 const AGE_BUCKETS: { key: AgeBucket; label: string; cls: string }[] = [
   { key: "fresh", label: "< 1 day", cls: "border-emerald-700/40 bg-emerald-500 dark:bg-emerald-600" },
@@ -57,8 +57,8 @@ const AGE_BUCKETS: { key: AgeBucket; label: string; cls: string }[] = [
   { key: "old", label: "older", cls: "border-red-700/40 bg-red-500 dark:bg-red-600" },
 ];
 
-function ageBucket(oldestSyncedAt: number): AgeBucket {
-  const age = Date.now() - oldestSyncedAt;
+function ageBucket(epochMs: number): AgeBucket {
+  const age = Date.now() - epochMs;
   if (age < DAY) return "fresh";
   if (age < 7 * DAY) return "recent";
   if (age < 30 * DAY) return "stale";
