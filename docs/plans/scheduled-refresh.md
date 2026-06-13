@@ -5,11 +5,12 @@ Status: **shipped**.
 ## What shipped
 
 - Hourly cron-triggered Cloudflare Workflow `uh-course-search-refresh` (cron `0 * * * *`), defined in `web/wrangler.jsonc` `workflows` binding, class `RefreshWorkflow` in `web/src/workflows/refresh.ts`, Worker entry `web/src/worker.ts`.
-- Orchestrator `web/src/lib/ingest/refresh.ts`: `refreshMutableTerms` (all non-view-only terms) and `refreshTerm` (single term) — Tier A full sync + Tier B1 diff-driven detail re-fetch + Tier B2 weekly full-details safety net.
+- Orchestrator `web/src/lib/ingest/refresh.ts`: `refreshMutableTerms` (all non-view-only terms) and `refreshTerm` (single term) — Tier A full sync + Tier B1 diff-driven detail re-fetch + Tier B2 rolling detail safety net (see Hardening bullet below).
 - Manual entry points: `POST /api/admin/refresh-run` (secret-guarded) and `yarn ingest refresh-run [--term 202710] [--delayMs 200]`.
 - Section-core diff classifier in `web/src/lib/ingest/diff.ts` (new/dropped/structural CRNs; seat fields excluded).
-- Migration `0008` (`web/migrations/0008_term_details_synced.sql`) adds `term.last_details_synced_at` (the Tier B2 staleness marker).
+- Migration `0008` (`web/migrations/0008_term_details_synced.sql`) added `term.last_details_synced_at` (since superseded and dropped by migration `0009` — see the Hardening bullet below).
 - **Content-aware delta write** (`web/src/lib/ingest/diff.ts` `classifyForWrite` + `web/src/lib/db/upsert.ts` writers): Tier A writes only new/changed/dropped sections — seat-only changes UPDATE the row without rewriting child rows; unchanged sections are skipped — cutting D1 writes on the hourly sweep. Per-row `synced_at` becomes last-modified; `term.last_synced_at` remains last-verified.
+- **Hardening (post-merge):** the Workflow now runs **bounded steps per term** (enumerate subjects → one sync step per ~40-subject session-batch via `syncSubjectBatch` → finalize → details), and **Tier B2 is rolling** — each run refreshes the `REFRESH_ROLLING_DETAIL_CRNS` (default 250) stalest detail CRNs (`getStaleDetailCrns`, never-fetched first) instead of a >7-day full pass. Migration `0009` drops `term.last_details_synced_at` (the old full-pass gate; detail freshness is now `MIN(section_detail.synced_at)`). This fixed the first prod run, which timed out running a full B2 details pass for the ~9k-section term inside one step.
 
 ## Problem
 
@@ -58,6 +59,8 @@ Re-run `syncTerm` on every `is_view_only = 0` term every hour. ~1k requests tota
 mutable terms; well inside paid limits; keeps seats/waitlist/meeting-times/faculty fresh to ≤1h.
 Per-CRN seat refresh is **not** used for whole-term freshness (it is ~25× costlier for less data).
 
+In the Workflow this runs as bounded steps: one `enumerateSyncSubjects` step then one `syncSubjectBatch` step per ~40-subject session-batch, so no single step approaches the 10-minute step timeout at any term size. `syncTerm` (CLI/admin) composes the same pieces.
+
 ### Tier B — re-freshing the expensive details
 
 Tier B's job is the low-volatility detail endpoints (restrictions, fees, cross-list, linked,
@@ -82,9 +85,7 @@ cross-list CRNs, `syllabus`, `reservedSeatSummary` is always `null` in search; c
 a section row at all). So a fee/restriction/text edit on a section whose *core* did not move is
 invisible to the diff. B2 closes this gap.
 
-**B2 — weekly safety net.** If a term's last full details pass is older than 7 days, run the full
-`syncDetails` pass for it. This is the only thing that catches the invisible detail/text edits.
-Stagger across terms so they don't all fire in the same hour.
+**B2 — rolling safety net.** Each run refreshes the K stalest detail CRNs for a term — `getStaleDetailCrns` orders `course_section LEFT JOIN section_detail` by `COALESCE(section_detail.synced_at, 0) ASC` (never-fetched first), bounded by `REFRESH_ROLLING_DETAIL_CRNS` (default 250, dashboard-editable). This is the only thing that catches the invisible detail/text edits, and it fills never-viewed details over time. Sized so even the ~9k-section term cycles every detail within ~1.5 days at hourly cadence (9170 / 250 ≈ 37 runs); a small term cycles in a single run. Bounded per run → no thundering full pass and no step timeout.
 
 ### Orchestration — one cron-triggered Cloudflare Workflow
 
@@ -102,14 +103,9 @@ Per hourly run:
 
 1. **`refreshTerms`** (~1–2 requests) — recompute `is_view_only` and pick up new terms, so terms
    that flipped to view-only drop out of the sweep and new ones join.
-2. **For each mutable term — Tier A full sync** as one `step.do()` per term (term-level
-   resumability + retry; a single step keeps the in-memory SIS session/rotation in `syncTerm`
-   intact, since a session can't cross step boundaries), with `step.sleep` pacing between terms.
-   The diff (B1) is computed inside this write path and its new/dropped/structurally-changed CRN
-   sets are emitted.
+2. **For each mutable term — Tier A** as bounded steps: an `enumerateSyncSubjects` step, then one `syncSubjectBatch` `step.do()` per ~40-subject session-batch (each its own SIS session — a session can't cross a step boundary anyway), then a `markTermSynced` finalize step. The diff (B1) is accumulated across batches from the steps' return values.
 3. **Tier B B1** — fetch/delete/re-fetch details for the CRN sets from step 2.
-4. **Tier B B2** — for each mutable term whose `last_details_synced_at` is >7 days old (staggered),
-   run the full `syncDetails` pass.
+4. **Tier B B2 (rolling)** — refresh the `REFRESH_ROLLING_DETAIL_CRNS` stalest detail CRNs for the term (`getStaleDetailCrns`), bounded per run. B1 + B2 share `refreshTermDetails` and run in the per-term details step.
 
 `limits.subrequests` in `wrangler.jsonc` is raised (e.g. 50,000) to cover a worst-case term. CPU is a
 non-issue — the work is almost entirely `await fetch()` to Banner (CPU caps at 5 min/invocation; the
@@ -118,8 +114,7 @@ platform constraint.
 
 ## Schema
 
-- New migration: add `last_details_synced_at INTEGER` to `term` (drives the B2 weekly boundary and
-  surfaces details freshness; the column does not exist today).
+- Migration `0008` added `last_details_synced_at`; migration `0009` **drops it again** — the rolling Tier B2 (above) superseded the >7-day full-pass boundary it gated. Detail freshness is now read directly from `MIN(section_detail.synced_at)` per term, no dedicated column.
 - Diffing needs the pre-replace section set. The sync already reads and writes per `(term, subject)`,
   so the diff is computed in that write path from the rows being replaced — no extra storage or
   snapshot table required. (The write mechanism was subsequently optimized: rather than
@@ -130,12 +125,14 @@ platform constraint.
 ## Verification
 
 - **Unit** — the diff classifier (new / dropped / structural, with seat/enrollment fields excluded)
-  and the B2 weekly-boundary trigger.
-- **e2e (chromium, against the mock SIS, extending `ingest.spec.ts`)** — a Workflow run:
+  and the rolling-B2 cursor (`getStaleDetailCrns` orders never-fetched details first and is bounded
+  by `REFRESH_ROLLING_DETAIL_CRNS`).
+- **e2e (chromium, against the mock SIS, extending `ingest.spec.ts`)** — a Workflow/refresh run:
   advances `last_synced_at`; refreshes a changed seat count; fetches details for a newly-appeared CRN;
-  deletes details for a dropped CRN; **skips** a details re-fetch for a seat-only change; and triggers
-  the full details pass when `last_details_synced_at` is stale. The mock already reproduces Banner's
-  stateful-form quirk, preserving the `resetDataForm` regression guard.
+  deletes details for a dropped CRN; **skips** a details re-fetch for a seat-only change (Tier A delta
+  write); and rolls the stalest detail CRNs every run (Tier B2), filling details for a CRN that was
+  never in any diff. The mock already reproduces Banner's stateful-form quirk, preserving the
+  `resetDataForm` regression guard.
 
 ## Out of scope
 

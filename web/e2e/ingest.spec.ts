@@ -262,8 +262,9 @@ test("scheduled refresh: diff-driven detail re-fetch (Tier B1)", async ({ reques
   const advance = await request.post(`${MOCK_ORIGIN}/__mock/advance`);
   expect(advance.ok()).toBeTruthy();
 
-  // Run the scheduled refresh scoped to TERM (skips refreshTerms; uses the
-  // last_details_synced_at seeded in global-setup so B2 does NOT fire here).
+  // Run the scheduled refresh scoped to TERM (skips refreshTerms). Rolling Tier
+  // B2 now fires every refresh-run, refreshing the stalest detail CRNs up to the
+  // REFRESH_ROLLING_DETAIL_CRNS cap (default 250).
   const run = await request.post(`/api/admin/refresh-run?term=${TERM}&delayMs=0`, {
     headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
   });
@@ -285,8 +286,10 @@ test("scheduled refresh: diff-driven detail re-fetch (Tier B1)", async ({ reques
   const fetched = [...summary.detailFetchedCrns].sort();
   expect(fetched).toEqual(["10003", "10007"].sort());
 
-  // B2 must NOT have fired (last_details_synced_at is fresh).
-  expect(summary.detailsFullPass).toBe(false);
+  // Rolling Tier B2 runs every refresh: it refreshes the stalest detail CRNs,
+  // bounded by REFRESH_ROLLING_DETAIL_CRNS (250). With 9 sections < cap, all roll.
+  expect(summary.detailsFullPass).toBeUndefined();
+  expect(summary.detailsRolled).toBe(9);
 
   // Tier A delta-write counts: 1 new (10007), 1 structural (10003), 3 seat-only
   // (10002/10004/10005 — the preceding seat-refresh wrote enrollment:35/seats:5
@@ -313,36 +316,30 @@ test("scheduled refresh: diff-driven detail re-fetch (Tier B1)", async ({ reques
   expect(droppedSect.status()).toBe(404);
 });
 
-test("scheduled refresh: stale details trigger a full pass (Tier B2)", async ({ request }) => {
-  // Provide a clock 8 days ahead of the current real time so the staleness check
-  // (>7 days) fires regardless of when last_details_synced_at was last written
-  // (the "details sync" test above calls syncDetails unscoped, which updates
-  // last_details_synced_at to Date.now() — so we must use a fakeNow relative to
-  // the real clock, not the seeded SYNCED epoch).
-  const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
-  const fakeNow = Date.now() + EIGHT_DAYS_MS;
-
-  // The mock is already at phase 2 from the previous test; that's fine — we only
-  // care that the full-pass flag fires and touches every CRN.
-  const run = await request.post(
-    `/api/admin/refresh-run?term=${TERM}&delayMs=0&now=${fakeNow}`,
-    { headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" } }
-  );
+test("scheduled refresh: rolling Tier B2 refreshes stale details every run", async ({ request }) => {
+  // The mock is still at phase 2 from the B1 test, and D1 already holds phase 2 →
+  // Tier A writes NOTHING this run. Rolling Tier B2 still refreshes the stalest
+  // detail CRNs (no >7-day gate, no `now=` override — it fires every run).
+  const run = await request.post(`/api/admin/refresh-run?term=${TERM}&delayMs=0`, {
+    headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
+  });
   expect(run.ok()).toBeTruthy();
   const body = await run.json();
   expect(body.ok).toBe(true);
 
   const summary = body.terms.find((t: { term: string }) => t.term === TERM);
   expect(summary).toBeDefined();
-  expect(summary.detailsFullPass).toBe(true);
 
-  // Core proof of the optimization: the mock is still at phase 2, which is
-  // identical to what B1 already stored → Tier A writes NOTHING, all 9 sections
-  // are byte-identical to the stored rows.
+  // No full-pass flag anymore; rolling B2 reports a count instead. 9 sections < the
+  // 250 cap, so every stale detail CRN rolls.
+  expect(summary.detailsFullPass).toBeUndefined();
+  expect(summary.detailsRolled).toBe(9);
+
+  // Delta-write no-op: mock unchanged from B1 → all 9 sections byte-identical.
   expect(summary.writes).toEqual({ inserted: 0, structural: 0, seatUpdated: 0, deleted: 0, unchanged: 9 });
 
-  // An unchanged CRN that was never in any diff (10002 = ICS 111 §002) should
-  // now have a section_detail row, proving the full pass ran over every CRN.
+  // A CRN that was never in any diff (10002 = ICS 111 §002) has a section_detail
+  // row — proving rolling B2 fills details for CRNs the B1 diff never touched.
   const unchanged = await request.get("/api/section", {
     params: { term: TERM, crn: "10002" },
   });

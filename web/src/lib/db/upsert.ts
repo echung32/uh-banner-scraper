@@ -633,18 +633,6 @@ export async function markTermSubjectsSynced(db: D1Like, term: string, at: numbe
   await db.prepare("UPDATE term SET subjects_synced_at = ? WHERE code = ?").bind(at, term).run();
 }
 
-/** Stamps a term's last FULL course-details pass (Tier B2 boundary). */
-export async function markDetailsSynced(
-  db: D1Like,
-  term: string,
-  syncedAt: number
-): Promise<void> {
-  await db
-    .prepare("UPDATE term SET last_details_synced_at = ? WHERE code = ?")
-    .bind(syncedAt, term)
-    .run();
-}
-
 /** Removes section_detail rows for CRNs that no longer exist in a term. */
 export async function deleteSectionDetails(
   db: D1Like,

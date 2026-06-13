@@ -372,6 +372,31 @@ export async function getSectionDetail(
   };
 }
 
+/**
+ * The CRNs whose section detail is stalest for a term — the rolling Tier B2
+ * cursor (docs/plans/scheduled-refresh.md). Never-fetched sections (no
+ * section_detail row) sort first via COALESCE(...,0); then oldest synced_at.
+ * Sized by the caller so a term fully cycles within the freshness window.
+ */
+export async function getStaleDetailCrns(
+  db: D1Like,
+  term: string,
+  limit: number
+): Promise<string[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT cs.crn AS crn
+         FROM course_section cs
+         LEFT JOIN section_detail sd ON sd.term = cs.term AND sd.crn = cs.crn
+        WHERE cs.term = ?
+        ORDER BY COALESCE(sd.synced_at, 0) ASC, cs.crn ASC
+        LIMIT ?`
+    )
+    .bind(term, limit)
+    .all<{ crn: string }>();
+  return results.map((r) => r.crn);
+}
+
 export interface Instructor {
   bannerId: string;
   displayName: string | null;
