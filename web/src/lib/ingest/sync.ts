@@ -19,6 +19,8 @@ import {
   startSyncRun,
   upsertSubjects,
 } from "@/lib/db/upsert";
+import { rowToCourseSection } from "@/lib/db/mappers";
+import { classifySectionChanges, type SectionDiff } from "@/lib/ingest/diff";
 
 const PAGE_SIZE = 500;
 const SESSION_MAX_AGE_MS = 27 * 60 * 1000; // re-handshake before the ~30-min server expiry
@@ -37,10 +39,25 @@ export interface SyncOptions {
   subjectsPerSession?: number;
   /** Progress callback. */
   log?: (msg: string) => void;
+  /** Accumulate a section-core diff across subjects (Tier B1). Default false. */
+  collectDiff?: boolean;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Current stored sections for one (term, subject) — used to diff a re-sync. */
+async function readSubjectSections(
+  db: D1Like,
+  term: string,
+  subject: string
+): Promise<CourseSection[]> {
+  const { results } = await db
+    .prepare("SELECT raw_json FROM course_section WHERE term = ? AND subject = ?")
+    .bind(term, subject)
+    .all<{ raw_json: string }>();
+  return results.map(rowToCourseSection);
 }
 
 /** Pulls every section for one (term, subject) across all result pages. */
@@ -70,6 +87,8 @@ export interface SyncResult {
   subjects: number;
   sections: number;
   status: "ok" | "partial" | "error";
+  /** Present only when collectDiff was set; aggregated across all subjects. */
+  diff?: SectionDiff;
 }
 
 /** Full sync of a single term. */
@@ -81,6 +100,8 @@ export async function syncTerm(
   const log = options.log ?? (() => {});
   const delay = options.subjectDelayMs ?? DEFAULT_SUBJECT_DELAY_MS;
   const perSession = options.subjectsPerSession ?? DEFAULT_SUBJECTS_PER_SESSION;
+  const collectDiff = options.collectDiff ?? false;
+  const diff: SectionDiff = { newCrns: [], droppedCrns: [], structuralCrns: [] };
   const startedAt = Date.now();
   const run = await startSyncRun(db, termCode, "full", startedAt);
 
@@ -118,6 +139,13 @@ export async function syncTerm(
             session = await establishSession(termCode);
           }
           const sections = await fetchAllSections(session, termCode, subject.code);
+          if (collectDiff) {
+            const existing = await readSubjectSections(db, termCode, subject.code);
+            const d = classifySectionChanges(existing, sections);
+            diff.newCrns.push(...d.newCrns);
+            diff.droppedCrns.push(...d.droppedCrns);
+            diff.structuralCrns.push(...d.structuralCrns);
+          }
           written = await replaceSubjectSections(
             db,
             termCode,
@@ -161,5 +189,11 @@ export async function syncTerm(
     });
   }
 
-  return { term: termCode, subjects: subjectsDone, sections: totalSections, status };
+  return {
+    term: termCode,
+    subjects: subjectsDone,
+    sections: totalSections,
+    status,
+    ...(collectDiff ? { diff } : {}),
+  };
 }
