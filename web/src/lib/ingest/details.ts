@@ -43,7 +43,6 @@ import type { D1Like } from "@/lib/db/types";
 import { catalogFacetKind, deriveCatalogFacet } from "@/lib/db/queries";
 import {
   finishSyncRun,
-  markDetailsSynced,
   replaceFilterOptions,
   startSyncRun,
   upsertCourse,
@@ -112,9 +111,9 @@ export interface DetailsOptions {
   log?: (msg: string) => void;
   /**
    * Restrict the catalog / section-detail / instructor passes to these CRNs
-   * (Tier B1 diff-driven refresh). When set, the term-level filter-option pass
-   * is skipped and last_details_synced_at is NOT stamped (it's a partial pass).
-   * Undefined = full term pass (Tier B2), which stamps last_details_synced_at.
+   * (Tier B1 diff-driven refresh, and the rolling Tier B2 cursor). When set, the
+   * term-level filter-option pass is skipped (it's a scoped, partial pass).
+   * Undefined = full term pass (filter options + every course/section/instructor).
    */
   crns?: string[];
 }
@@ -434,9 +433,6 @@ export async function syncDetails(
       if (ins.status === "partial") status = "partial";
     }
 
-    if (!scoped && status !== "error") {
-      await markDetailsSynced(db, term, Date.now());
-    }
     await finishSyncRun(db, run, {
       finishedAt: Date.now(),
       status,
