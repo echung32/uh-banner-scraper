@@ -3,9 +3,9 @@
   // Must match the GitHub-connected Workers service so Workers Builds deploys to
   // it (dash: workers/services/view/uh-course-search).
   "name": "uh-course-search",
-  // The @astrojs/cloudflare v13 adapter owns the Worker entry + assets via
-  // @cloudflare/vite-plugin; point main at its unified entrypoint.
-  "main": "@astrojs/cloudflare/entrypoints/server",
+  // Custom Worker entry that re-exports the adapter's request handler as `fetch`
+  // plus the RefreshWorkflow class for the hourly cron-triggered Workflow binding.
+  "main": "./src/worker.ts",
   "compatibility_date": "2026-06-01",
   // nodejs_compat_populate_process_env makes Worker vars/secrets readable via
   // `process.env.*` (the app relies on this — see astro.config.mjs).
@@ -24,6 +24,24 @@
       "database_name": "uh-course-search-db",
       "database_id": "ef6df010-9587-4a18-82f7-d07251d90056",
       "migrations_dir": "./migrations"
+    }
+  ],
+  // Runtime config readable via process.env (see compat flag above). SIS_BASE_URL
+  // is the live Banner host (only the lazy cache-on-miss paths call it). Feature
+  // flags default on; LOG_SOURCE off in prod. ADMIN_SECRET is a *secret*
+  // (`wrangler secret put ADMIN_SECRET`). INGEST_ON_WORKER is intentionally unset
+  // → admin ingestion routes return 501 in production (ingestion is Node-only).
+  // Subrequest budget raised to cover Tier A full sync across multiple terms
+  // (default Worker limit is 1000; each term can require ~200-400 subrequests).
+  "limits": { "subrequests": 50000 },
+  // Hourly cron-triggered Workflow: refreshes all non-view-only terms each hour.
+  // schedules on the binding eliminates the need for a separate scheduled() handler.
+  "workflows": [
+    {
+      "binding": "REFRESH_WORKFLOW",
+      "name": "uh-course-search-refresh",
+      "class_name": "RefreshWorkflow",
+      "schedules": ["0 * * * *"]
     }
   ],
   // Runtime config readable via process.env (see compat flag above). SIS_BASE_URL
