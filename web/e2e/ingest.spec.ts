@@ -288,6 +288,14 @@ test("scheduled refresh: diff-driven detail re-fetch (Tier B1)", async ({ reques
   // B2 must NOT have fired (last_details_synced_at is fresh).
   expect(summary.detailsFullPass).toBe(false);
 
+  // Tier A delta-write counts: 1 new (10007), 1 structural (10003), 3 seat-only
+  // (10002/10004/10005 — the preceding seat-refresh wrote enrollment:35/seats:5
+  // for those, but phase-2 carries the original enrollment:30/seats:10, so they
+  // now differ seat-only vs stored; 10001 matches stored exactly because phase-2
+  // explicitly sets enrollment:35/seats:5 matching the seat-refresh values);
+  // 1 deleted (10006); 4 unchanged (10001 + 20001/02/03).
+  expect(summary.writes).toEqual({ inserted: 1, structural: 1, seatUpdated: 3, deleted: 1, unchanged: 4 });
+
   // Section counts reflect the add/drop: still 6 ICS (10001-10005 + 10007) + 3 MATH.
   expect(
     await searchCount(request, { term: TERM, subject: "ICS", pageMaxSize: "50" })
@@ -327,6 +335,11 @@ test("scheduled refresh: stale details trigger a full pass (Tier B2)", async ({ 
   const summary = body.terms.find((t: { term: string }) => t.term === TERM);
   expect(summary).toBeDefined();
   expect(summary.detailsFullPass).toBe(true);
+
+  // Core proof of the optimization: the mock is still at phase 2, which is
+  // identical to what B1 already stored → Tier A writes NOTHING, all 9 sections
+  // are byte-identical to the stored rows.
+  expect(summary.writes).toEqual({ inserted: 0, structural: 0, seatUpdated: 0, deleted: 0, unchanged: 9 });
 
   // An unchanged CRN that was never in any diff (10002 = ICS 111 §002) should
   // now have a section_detail row, proving the full pass ran over every CRN.

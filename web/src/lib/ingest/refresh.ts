@@ -41,6 +41,8 @@ export interface TermRefreshSummary {
   detailFetchedCrns: string[];
   /** True if the Tier B2 full-details pass ran this cycle. */
   detailsFullPass: boolean;
+  /** Tier A delta-write counts (rows actually written vs skipped). */
+  writes: { inserted: number; structural: number; seatUpdated: number; deleted: number; unchanged: number };
 }
 
 export interface RefreshResult {
@@ -118,6 +120,7 @@ export async function refreshTerm(
     structuralCrns: diff.structuralCrns,
     detailFetchedCrns,
     detailsFullPass,
+    writes: sync.writes ?? { inserted: 0, structural: 0, seatUpdated: 0, deleted: 0, unchanged: 0 },
   };
 }
 

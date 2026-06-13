@@ -123,30 +123,3 @@ export function structuralFingerprint(s: CourseSection): string {
   });
 }
 
-export function classifySectionChanges(
-  existing: CourseSection[],
-  incoming: CourseSection[]
-): SectionDiff {
-  const existingByCrn = new Map(
-    existing.map((s) => [s.courseReferenceNumber, s])
-  );
-  const incomingByCrn = new Map(
-    incoming.map((s) => [s.courseReferenceNumber, s])
-  );
-
-  const newCrns: string[] = [];
-  const structuralCrns: string[] = [];
-  for (const [crn, inc] of incomingByCrn) {
-    const prev = existingByCrn.get(crn);
-    if (!prev) {
-      newCrns.push(crn);
-    } else if (structuralFingerprint(prev) !== structuralFingerprint(inc)) {
-      structuralCrns.push(crn);
-    }
-  }
-  const droppedCrns: string[] = [];
-  for (const crn of existingByCrn.keys()) {
-    if (!incomingByCrn.has(crn)) droppedCrns.push(crn);
-  }
-  return { newCrns, droppedCrns, structuralCrns };
-}
