@@ -17,12 +17,14 @@
  *   yarn ingest sync [--term 202730] [--delayMs 250] [--subjectsPerSession N]
  *   yarn ingest sync-details --term 202730 [--delayMs 250] [--no-sections] ...
  *   yarn ingest refresh-seats --term 202730 [--subject ICS] [--crns a,b] [--max 100]
+ *   yarn ingest refresh-run [--term 202710] [--delayMs 200]
  */
 import { getDb } from "@/lib/db/client";
 import { refreshTerms } from "@/lib/ingest/terms";
 import { syncTerm } from "@/lib/ingest/sync";
 import { syncDetails } from "@/lib/ingest/details";
 import { refreshSeats } from "@/lib/ingest/seatRefresh";
+import { refreshMutableTerms } from "@/lib/ingest/refresh";
 
 type Flags = Record<string, string | boolean>;
 
@@ -113,9 +115,21 @@ async function main() {
       break;
     }
 
+    case "refresh-run": {
+      const result = await refreshMutableTerms(db, {
+        terms: typeof flags.term === "string" ? [flags.term] : undefined,
+        skipTermRefresh: typeof flags.term === "string",
+        subjectDelayMs: num(flags.delayMs) ?? 200,
+        courseDelayMs: num(flags.delayMs) ?? 200,
+        log,
+      });
+      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      break;
+    }
+
     default:
       console.error(
-        "Usage: yarn ingest <refresh-terms|sync|sync-details|refresh-seats> [flags]"
+        "Usage: yarn ingest <refresh-terms|sync|sync-details|refresh-seats|refresh-run> [flags]"
       );
       process.exit(1);
   }

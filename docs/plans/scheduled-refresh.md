@@ -1,6 +1,14 @@
 # Scheduled Metadata Refresh for Mutable Terms (design)
 
-Status: **proposed**. Designed via brainstorming on 2026-06-13; not yet implemented.
+Status: **shipped**.
+
+## What shipped
+
+- Hourly cron-triggered Cloudflare Workflow `uh-course-search-refresh` (cron `0 * * * *`), defined in `web/wrangler.jsonc` `workflows` binding, class `RefreshWorkflow` in `web/src/workflows/refresh.ts`, Worker entry `web/src/worker.ts`.
+- Orchestrator `web/src/lib/ingest/refresh.ts`: `refreshMutableTerms` (all non-view-only terms) and `refreshTerm` (single term) — Tier A full sync + Tier B1 diff-driven detail re-fetch + Tier B2 weekly full-details safety net.
+- Manual entry points: `POST /api/admin/refresh-run` (secret-guarded) and `yarn ingest refresh-run [--term 202710] [--delayMs 200]`.
+- Section-core diff classifier in `web/src/lib/ingest/diff.ts` (new/dropped/structural CRNs; seat fields excluded).
+- Migration `0008` (`web/migrations/0008_term_details_synced.sql`) adds `term.last_details_synced_at` (the Tier B2 staleness marker).
 
 ## Problem
 
