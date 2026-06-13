@@ -8,7 +8,7 @@ Status: **shipped**.
 - Orchestrator `web/src/lib/ingest/refresh.ts`: `refreshMutableTerms` (all non-view-only terms) and `refreshTerm` (single term) — Tier A full sync + Tier B1 diff-driven detail re-fetch + Tier B2 rolling detail safety net (see Hardening bullet below).
 - Manual entry points: `POST /api/admin/refresh-run` (secret-guarded) and `yarn ingest refresh-run [--term 202710] [--delayMs 200]`.
 - Section-core diff classifier in `web/src/lib/ingest/diff.ts` (new/dropped/structural CRNs; seat fields excluded).
-- Migration `0008` (`web/migrations/0008_term_details_synced.sql`) adds `term.last_details_synced_at` (the Tier B2 staleness marker).
+- Migration `0008` (`web/migrations/0008_term_details_synced.sql`) added `term.last_details_synced_at` (since superseded and dropped by migration `0009` — see the Hardening bullet below).
 - **Content-aware delta write** (`web/src/lib/ingest/diff.ts` `classifyForWrite` + `web/src/lib/db/upsert.ts` writers): Tier A writes only new/changed/dropped sections — seat-only changes UPDATE the row without rewriting child rows; unchanged sections are skipped — cutting D1 writes on the hourly sweep. Per-row `synced_at` becomes last-modified; `term.last_synced_at` remains last-verified.
 - **Hardening (post-merge):** the Workflow now runs **bounded steps per term** (enumerate subjects → one sync step per ~40-subject session-batch via `syncSubjectBatch` → finalize → details), and **Tier B2 is rolling** — each run refreshes the `REFRESH_ROLLING_DETAIL_CRNS` (default 250) stalest detail CRNs (`getStaleDetailCrns`, never-fetched first) instead of a >7-day full pass. Migration `0009` drops `term.last_details_synced_at` (the old full-pass gate; detail freshness is now `MIN(section_detail.synced_at)`). This fixed the first prod run, which timed out running a full B2 details pass for the ~9k-section term inside one step.
 
@@ -125,12 +125,14 @@ platform constraint.
 ## Verification
 
 - **Unit** — the diff classifier (new / dropped / structural, with seat/enrollment fields excluded)
-  and the B2 weekly-boundary trigger.
-- **e2e (chromium, against the mock SIS, extending `ingest.spec.ts`)** — a Workflow run:
+  and the rolling-B2 cursor (`getStaleDetailCrns` orders never-fetched details first and is bounded
+  by `REFRESH_ROLLING_DETAIL_CRNS`).
+- **e2e (chromium, against the mock SIS, extending `ingest.spec.ts`)** — a Workflow/refresh run:
   advances `last_synced_at`; refreshes a changed seat count; fetches details for a newly-appeared CRN;
-  deletes details for a dropped CRN; **skips** a details re-fetch for a seat-only change; and triggers
-  the full details pass when `last_details_synced_at` is stale. The mock already reproduces Banner's
-  stateful-form quirk, preserving the `resetDataForm` regression guard.
+  deletes details for a dropped CRN; **skips** a details re-fetch for a seat-only change (Tier A delta
+  write); and rolls the stalest detail CRNs every run (Tier B2), filling details for a CRN that was
+  never in any diff. The mock already reproduces Banner's stateful-form quirk, preserving the
+  `resetDataForm` regression guard.
 
 ## Out of scope
 
