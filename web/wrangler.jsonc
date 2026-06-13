@@ -50,6 +50,7 @@
     "SECTION_LAZY_FETCH": "1",
     "COURSE_TEXT_LAZY": "1",
     "EDGE_CACHE": "1",
-    "LOG_SOURCE": "0"
+    "LOG_SOURCE": "0",
+    "REFRESH_ROLLING_DETAIL_CRNS": "250"
   }
 }

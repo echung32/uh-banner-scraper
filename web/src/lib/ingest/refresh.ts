@@ -4,19 +4,32 @@
  * Tier A: full sync each mutable term (cheap; also refreshes seats/waitlist).
  * Tier B1: re-fetch course/section/instructor details for NEW + STRUCTURALLY
  *          changed CRNs from the Tier A diff; delete detail for DROPPED CRNs.
- * Tier B2: if a term's last FULL details pass is >7 days old, run the full
- *          syncDetails pass (catches fee/restriction/text edits the diff can't
- *          see). Driven hourly by RefreshWorkflow; also runnable from the CLI /
- *          admin route. Reuses syncTerm + syncDetails verbatim.
+ * Tier B2: each run refreshes the K stalest detail CRNs (never-fetched first),
+ *          bounded by REFRESH_ROLLING_DETAIL_CRNS (default 250). Catches
+ *          fee/restriction/text edits the diff can't see. Driven hourly by
+ *          RefreshWorkflow; also runnable from the CLI / admin route.
+ *          Reuses syncTerm + syncDetails verbatim.
  */
 import type { D1Like } from "@/lib/db/types";
 import { refreshTerms } from "@/lib/ingest/terms";
 import { syncTerm } from "@/lib/ingest/sync";
 import { syncDetails } from "@/lib/ingest/details";
 import { deleteSectionDetails } from "@/lib/db/upsert";
+import { getStaleDetailCrns } from "@/lib/db/queries";
+import type { SectionDiff } from "@/lib/ingest/diff";
 
-const DETAILS_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000; // Tier B2 staleness boundary
 const CRN_BATCH = 90; // keep IN(...) lists under the remote-D1 ~100 param cap
+
+// Tier B2 rolling cap: max stale detail CRNs refreshed per term per run.
+// Env-tunable via REFRESH_ROLLING_DETAIL_CRNS (default 250) so cadence can be
+// changed live in the Cloudflare dashboard without a code deploy. Sized so even
+// the largest term (~9k sections) cycles within a few days at hourly cadence
+// (9170 / 250 ≈ 37 runs ≈ ~1.5 days). Bounded → no thundering full pass.
+const DEFAULT_ROLLING_DETAIL_CRNS = 250;
+function rollingDetailCrns(): number {
+  const n = Number(process.env.REFRESH_ROLLING_DETAIL_CRNS);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : DEFAULT_ROLLING_DETAIL_CRNS;
+}
 
 export interface RefreshOptions {
   /** Restrict to these term codes (e.g. e2e). Default: every is_view_only=0 term. */
@@ -25,8 +38,6 @@ export interface RefreshOptions {
   skipTermRefresh?: boolean;
   subjectDelayMs?: number;
   courseDelayMs?: number;
-  /** Override "now" for the B2 staleness check (testing). Default Date.now(). */
-  now?: number;
   log?: (msg: string) => void;
 }
 
@@ -39,8 +50,8 @@ export interface TermRefreshSummary {
   structuralCrns: string[];
   /** CRNs whose details were re-fetched in B1 (new ∪ structural). */
   detailFetchedCrns: string[];
-  /** True if the Tier B2 full-details pass ran this cycle. */
-  detailsFullPass: boolean;
+  /** Count of CRNs whose details were rolled (Tier B2) this run. */
+  detailsRolled: number;
   /** Tier A delta-write counts (rows actually written vs skipped). */
   writes: { inserted: number; structural: number; seatUpdated: number; deleted: number; unchanged: number };
 }
@@ -67,14 +78,56 @@ async function mutableTermCodes(db: D1Like, only?: string[]): Promise<string[]> 
   return results.map((r) => r.code);
 }
 
-/** Refreshes one term: Tier A sync + Tier B1 diff-driven details + Tier B2. */
+export interface DetailRefreshOptions {
+  courseDelayMs?: number;
+  log?: (msg: string) => void;
+}
+
+/**
+ * Tier B1 (diff-driven) + Tier B2 (rolling) detail refresh for one term.
+ * B1: fetch details for new ∪ structural CRNs, delete details for dropped CRNs.
+ * B2: refresh the K stalest detail CRNs (never-fetched first), bounded per run.
+ * Shared by refreshTerm (CLI/admin) and the RefreshWorkflow details step.
+ */
+export async function refreshTermDetails(
+  db: D1Like,
+  term: string,
+  diff: SectionDiff,
+  options: DetailRefreshOptions = {}
+): Promise<{ detailFetchedCrns: string[]; detailsRolled: number }> {
+  const log = options.log ?? (() => {});
+  const courseDelayMs = options.courseDelayMs ?? 0;
+
+  // Tier B1: re-fetch details for new + structural; delete dropped.
+  const detailFetchedCrns = [...diff.newCrns, ...diff.structuralCrns];
+  if (detailFetchedCrns.length > 0) {
+    for (const part of chunk(detailFetchedCrns, CRN_BATCH)) {
+      await syncDetails(db, term, { crns: part, filters: false, courseDelayMs, log });
+    }
+  }
+  if (diff.droppedCrns.length > 0) {
+    await deleteSectionDetails(db, term, diff.droppedCrns);
+  }
+
+  // Tier B2 (rolling): refresh the stalest details, bounded per run. B1's CRNs
+  // and the rolling set may overlap harmlessly (B1 just-fetched ones sort newest).
+  const staleCrns = await getStaleDetailCrns(db, term, rollingDetailCrns());
+  let detailsRolled = 0;
+  for (const part of chunk(staleCrns, CRN_BATCH)) {
+    await syncDetails(db, term, { crns: part, filters: false, courseDelayMs, log });
+    detailsRolled += part.length;
+  }
+
+  return { detailFetchedCrns, detailsRolled };
+}
+
+/** Refreshes one term: Tier A sync + Tier B1 diff-driven details + rolling Tier B2. */
 export async function refreshTerm(
   db: D1Like,
   term: string,
   options: RefreshOptions = {}
 ): Promise<TermRefreshSummary> {
   const log = options.log ?? (() => {});
-  const now = options.now ?? Date.now();
 
   // Tier A.
   const sync = await syncTerm(db, term, {
@@ -83,33 +136,12 @@ export async function refreshTerm(
     log,
   });
   const diff = sync.diff ?? { newCrns: [], droppedCrns: [], structuralCrns: [] };
-  const detailFetchedCrns = [...diff.newCrns, ...diff.structuralCrns];
 
-  // Tier B1: re-fetch details for new + structural; delete dropped.
-  if (detailFetchedCrns.length > 0) {
-    for (const part of chunk(detailFetchedCrns, CRN_BATCH)) {
-      await syncDetails(db, term, {
-        crns: part,
-        filters: false,
-        courseDelayMs: options.courseDelayMs ?? 0,
-        log,
-      });
-    }
-  }
-  if (diff.droppedCrns.length > 0) {
-    await deleteSectionDetails(db, term, diff.droppedCrns);
-  }
-
-  // Tier B2: full details pass if stale.
-  const row = await db
-    .prepare("SELECT last_details_synced_at AS at FROM term WHERE code = ?")
-    .bind(term)
-    .first<{ at: number | null }>();
-  const lastDetails = row?.at ?? 0;
-  const detailsFullPass = now - lastDetails > DETAILS_MAX_AGE_MS;
-  if (detailsFullPass) {
-    await syncDetails(db, term, { courseDelayMs: options.courseDelayMs ?? 0, log });
-  }
+  // Tier B1 + rolling B2.
+  const { detailFetchedCrns, detailsRolled } = await refreshTermDetails(db, term, diff, {
+    courseDelayMs: options.courseDelayMs,
+    log,
+  });
 
   return {
     term,
@@ -119,7 +151,7 @@ export async function refreshTerm(
     droppedCrns: diff.droppedCrns,
     structuralCrns: diff.structuralCrns,
     detailFetchedCrns,
-    detailsFullPass,
+    detailsRolled,
     writes: sync.writes ?? { inserted: 0, structural: 0, seatUpdated: 0, deleted: 0, unchanged: 0 },
   };
 }
