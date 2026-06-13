@@ -48,7 +48,7 @@ function relativeTime(epochMs: number): string {
 
 const DAY = 24 * 60 * 60 * 1000;
 
-/** Recency bucket for a backfill window, keyed on its oldest (stalest) write. */
+/** Recency bucket for an epoch-ms timestamp (used for the term's verified-fresh age). */
 type AgeBucket = "fresh" | "recent" | "stale" | "old";
 const AGE_BUCKETS: { key: AgeBucket; label: string; cls: string }[] = [
   { key: "fresh", label: "< 1 day", cls: "border-emerald-700/40 bg-emerald-500 dark:bg-emerald-600" },
@@ -57,8 +57,8 @@ const AGE_BUCKETS: { key: AgeBucket; label: string; cls: string }[] = [
   { key: "old", label: "older", cls: "border-red-700/40 bg-red-500 dark:bg-red-600" },
 ];
 
-function ageBucket(oldestSyncedAt: number): AgeBucket {
-  const age = Date.now() - oldestSyncedAt;
+function ageBucket(epochMs: number): AgeBucket {
+  const age = Date.now() - epochMs;
   if (age < DAY) return "fresh";
   if (age < 7 * DAY) return "recent";
   if (age < 30 * DAY) return "stale";
@@ -76,9 +76,10 @@ function windowRange(chunk: CoverageChunk, chunkSize: number, totalCount: number
 }
 
 function CoverageGrid({ detail }: { detail: CoverageDetail }) {
-  const { chunkSize, totalCount, totalChunks, chunks, mode } = detail;
+  const { chunkSize, totalCount, totalChunks, chunks, mode, lastSyncedAt } = detail;
 
-  // Backfill: every window is present and carries its own age → color by bucket.
+  // Backfill: every window is verified together each sweep → color all cells by
+  // the term-level verified time; demote per-window synced_at to "last changed".
   if (mode === "backfill") {
     return (
       <TooltipProvider delayDuration={200} disableHoverableContent>
@@ -87,22 +88,25 @@ function CoverageGrid({ detail }: { detail: CoverageDetail }) {
             const { start, end } = windowRange(c, chunkSize, totalCount);
             const oldest = c.oldestSyncedAt ?? 0;
             const newest = c.newestSyncedAt ?? oldest;
-            const ages =
+            // Color = term-level verified freshness (falls back to per-window oldest
+            // only if lastSyncedAt is absent, e.g. a legacy row).
+            const verifiedBucket = ageBucket(lastSyncedAt ?? oldest);
+            const lastChanged =
               oldest === newest
-                ? relativeTime(oldest)
-                : `oldest ${relativeTime(oldest)}, newest ${relativeTime(newest)}`;
+                ? `last changed ${relativeTime(oldest)}`
+                : `last changed: oldest ${relativeTime(oldest)}, newest ${relativeTime(newest)}`;
             return (
               <Tooltip key={c.index}>
                 <TooltipTrigger asChild>
                   <span
                     className={cn(
                       "h-3 w-3 rounded-[3px] border",
-                      bucketClass(ageBucket(oldest))
+                      bucketClass(verifiedBucket)
                     )}
                   />
                 </TooltipTrigger>
                 <TooltipContent>
-                  Sections {start}–{end} · {ages}
+                  Sections {start}–{end} · {lastChanged}
                 </TooltipContent>
               </Tooltip>
             );
@@ -154,9 +158,16 @@ function BackfillBody({ detail }: { detail: CoverageDetail }) {
   const newest = detail.chunks.reduce((m, c) => Math.max(m, c.newestSyncedAt ?? 0), 0);
   return (
     <div className="space-y-4">
+      <p className="text-sm font-medium">
+        Verified against Banner{" "}
+        <span className="font-normal text-muted-foreground">
+          {detail.lastSyncedAt ? relativeTime(detail.lastSyncedAt) : "—"}
+        </span>
+        <span className="ml-1 text-xs font-normal text-muted-foreground">
+          (all sections confirmed each full sync)
+        </span>
+      </p>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
-        <dt className="text-muted-foreground">Last full sync</dt>
-        <dd>{detail.lastSyncedAt ? relativeTime(detail.lastSyncedAt) : "—"}</dd>
         <dt className="text-muted-foreground">Last seat refresh</dt>
         <dd>{detail.lastSeatRefreshAt ? relativeTime(detail.lastSeatRefreshAt) : "never"}</dd>
         <dt className="text-muted-foreground">Sections</dt>
@@ -168,7 +179,8 @@ function BackfillBody({ detail }: { detail: CoverageDetail }) {
       <CoverageGrid detail={detail} />
       {oldest !== Infinity && (
         <p className="text-xs text-muted-foreground">
-          Slices span {relativeTime(oldest)} – {relativeTime(newest)}.
+          Sections in this view last changed between {relativeTime(oldest)} and{" "}
+          {relativeTime(newest)}.
         </p>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
@@ -256,7 +268,7 @@ export function CoverageDialog({ params, summary }: CoverageDialogProps) {
           className="cursor-pointer underline decoration-dotted underline-offset-2 hover:text-foreground"
           title={
             isBackfill
-              ? "View how fresh each 50-section window is"
+              ? "View how recently the term was verified; per-window last-changed on hover"
               : "View which 50-section windows are cached"
           }
         >
@@ -268,7 +280,7 @@ export function CoverageDialog({ params, summary }: CoverageDialogProps) {
           <DialogTitle>{isBackfill ? "Data freshness" : "Cache coverage"}</DialogTitle>
           <DialogDescription>
             {isBackfill
-              ? `Each cell is one ${summary.chunkSize}-section window; color shows how recently that slice was last written from Banner (a full sync or a seat refresh)${summary.isViewOnly ? ". This is a past, view-only term — a fixed snapshot" : ""}. Specific to the current sort and filters.`
+              ? `Each cell is one ${summary.chunkSize}-section window; color shows how recently the term was verified against Banner (last full sync); hover a window to see when its sections last changed${summary.isViewOnly ? ". This is a past, view-only term — a fixed snapshot" : ""}. Specific to the current sort and filters.`
               : `Each cell is one ${summary.chunkSize}-section window fetched from the live SIS. Coverage is specific to the current sort and filters — changing either starts a fresh set of windows.`}
           </DialogDescription>
         </DialogHeader>

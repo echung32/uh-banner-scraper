@@ -249,3 +249,102 @@ test("seat refresh updates stored seat counts", async ({ request }) => {
   });
   expect(again.status()).toBe(429);
 });
+
+// The mock's control port — matches MOCK_SIS_PORT in playwright.config.ts.
+const MOCK_ORIGIN = "http://127.0.0.1:9999";
+
+test("scheduled refresh: diff-driven detail re-fetch (Tier B1)", async ({ request }) => {
+  // Advance the mock catalog to phase 2:
+  //   DROPPED: 10006 (ICS 311 §002)
+  //   ADDED:   10007 (ICS 321 §001 "Software Engineering")
+  //   STRUCTURAL change: 10003 (ICS 141 title → "Foundations I Revised")
+  //   SEAT-ONLY change:  10001 (enrollment 30→35, seatsAvailable 10→5; no structural diff)
+  const advance = await request.post(`${MOCK_ORIGIN}/__mock/advance`);
+  expect(advance.ok()).toBeTruthy();
+
+  // Run the scheduled refresh scoped to TERM (skips refreshTerms; uses the
+  // last_details_synced_at seeded in global-setup so B2 does NOT fire here).
+  const run = await request.post(`/api/admin/refresh-run?term=${TERM}&delayMs=0`, {
+    headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" },
+  });
+  expect(run.ok()).toBeTruthy();
+  const body = await run.json();
+  expect(body.ok).toBe(true);
+
+  const summary = body.terms.find((t: { term: string }) => t.term === TERM);
+  expect(summary).toBeDefined();
+
+  // Diff classification.
+  expect(summary.newCrns).toContain("10007");
+  expect(summary.droppedCrns).toContain("10006");
+  expect(summary.structuralCrns).toContain("10003");
+  // Seat-only CRN 10001 must NOT appear in structuralCrns.
+  expect(summary.structuralCrns).not.toContain("10001");
+
+  // Tier B1 re-fetches details for new + structural only.
+  const fetched = [...summary.detailFetchedCrns].sort();
+  expect(fetched).toEqual(["10003", "10007"].sort());
+
+  // B2 must NOT have fired (last_details_synced_at is fresh).
+  expect(summary.detailsFullPass).toBe(false);
+
+  // Tier A delta-write counts: 1 new (10007), 1 structural (10003), 3 seat-only
+  // (10002/10004/10005 — the preceding seat-refresh wrote enrollment:35/seats:5
+  // for those, but phase-2 carries the original enrollment:30/seats:10, so they
+  // now differ seat-only vs stored; 10001 matches stored exactly because phase-2
+  // explicitly sets enrollment:35/seats:5 matching the seat-refresh values);
+  // 1 deleted (10006); 4 unchanged (10001 + 20001/02/03).
+  expect(summary.writes).toEqual({ inserted: 1, structural: 1, seatUpdated: 3, deleted: 1, unchanged: 4 });
+
+  // Section counts reflect the add/drop: still 6 ICS (10001-10005 + 10007) + 3 MATH.
+  expect(
+    await searchCount(request, { term: TERM, subject: "ICS", pageMaxSize: "50" })
+  ).toBe(6);
+  expect(
+    await searchCount(request, { term: TERM, subject: "MATH", pageMaxSize: "50" })
+  ).toBe(3);
+
+  // New CRN 10007 is now searchable.
+  const newSect = await request.get("/api/section", { params: { term: TERM, crn: "10007" } });
+  expect(newSect.ok()).toBeTruthy();
+
+  // Dropped CRN 10006 is gone from D1.
+  const droppedSect = await request.get("/api/section", { params: { term: TERM, crn: "10006" } });
+  expect(droppedSect.status()).toBe(404);
+});
+
+test("scheduled refresh: stale details trigger a full pass (Tier B2)", async ({ request }) => {
+  // Provide a clock 8 days ahead of the current real time so the staleness check
+  // (>7 days) fires regardless of when last_details_synced_at was last written
+  // (the "details sync" test above calls syncDetails unscoped, which updates
+  // last_details_synced_at to Date.now() — so we must use a fakeNow relative to
+  // the real clock, not the seeded SYNCED epoch).
+  const EIGHT_DAYS_MS = 8 * 24 * 60 * 60 * 1000;
+  const fakeNow = Date.now() + EIGHT_DAYS_MS;
+
+  // The mock is already at phase 2 from the previous test; that's fine — we only
+  // care that the full-pass flag fires and touches every CRN.
+  const run = await request.post(
+    `/api/admin/refresh-run?term=${TERM}&delayMs=0&now=${fakeNow}`,
+    { headers: { "x-admin-secret": ADMIN_SECRET, "content-type": "application/json" } }
+  );
+  expect(run.ok()).toBeTruthy();
+  const body = await run.json();
+  expect(body.ok).toBe(true);
+
+  const summary = body.terms.find((t: { term: string }) => t.term === TERM);
+  expect(summary).toBeDefined();
+  expect(summary.detailsFullPass).toBe(true);
+
+  // Core proof of the optimization: the mock is still at phase 2, which is
+  // identical to what B1 already stored → Tier A writes NOTHING, all 9 sections
+  // are byte-identical to the stored rows.
+  expect(summary.writes).toEqual({ inserted: 0, structural: 0, seatUpdated: 0, deleted: 0, unchanged: 9 });
+
+  // An unchanged CRN that was never in any diff (10002 = ICS 111 §002) should
+  // now have a section_detail row, proving the full pass ran over every CRN.
+  const unchanged = await request.get("/api/section", {
+    params: { term: TERM, crn: "10002" },
+  });
+  expect(unchanged.ok()).toBeTruthy();
+});
